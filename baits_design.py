@@ -594,26 +594,24 @@ def determine_depth_coverage(intervals, total_len):
     return [positions_depth, counts]
 
 
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design'
-bait_size = 120
-bait_offset = 120
-number_refs = 2 
-bait_identity = 1.0
-cluster_identity = 1.0
-minlen_contig = bait_size * 2
-contaminant_genome = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-contaminant_pident = 0.8
-contaminant_coverage = 0.5
-cluster_probes = False
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+#output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design'
+#bait_size = 120
+#bait_offset = 120
+#number_refs = 2 
+#bait_identity = 1.0
+#cluster_identity = 1.0
+#minlen_contig = bait_size * 2
+#exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
+#exclude_pident = 0.8
+#exclude_coverage = 0.5
+#cluster_probes = False
 
 
-def main(input_files, output_dir, bait_size, bait_offset,
-         number_refs, bait_identity, cluster_probes, cluster_identity,
-         minlen_contig, contaminant_genome, contaminant_pident,
-         contaminant_coverage):
-
-    print(cluster_probes)
+def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
+         bait_offset, bait_identity, bait_coverage, cluster_probes,
+         cluster_identity, cluster_coverage, exclude_regions, exclude_pident,
+         exclude_coverage):
 
     genomes = [os.path.join(input_files, file)
                for file in os.listdir(input_files)]
@@ -703,6 +701,7 @@ def main(input_files, output_dir, bait_size, bait_offset,
         print('Added {0} baits from genome {1}'.format(len(new_baits_lines), g))
 
     if cluster_probes is True:
+        print('Clustering probes...')
         # cluster baits and remove based on similarity threshold
         # create database
         mmseqs_db = os.path.join(output_dir, 'mmseqs_db')
@@ -754,17 +753,18 @@ def main(input_files, output_dir, bait_size, bait_offset,
 
         unique_baits = filtered_baits
 
-    if contaminant_genome is not None:
+    if exclude_regions is not None:
+        print('Mapping against  and removing similar probes...')
         # map against target genome that baits should not be specific for
-        gbasename = os.path.basename(contaminant_genome).split('.fna')[0]
+        gbasename = os.path.basename(exclude_regions).split('.fna')[0]
         paf_path = os.path.join(output_dir, gbasename+'.paf')
-        minimap_std = run_minimap2(contaminant_genome, unique_baits, paf_path)
+        minimap_std = run_minimap2(exclude_regions, unique_baits, paf_path)
 
         # import mapping results
         mapped_probes = read_tabular(paf_path)
         multispecific_probes = [l[0] for l in mapped_probes
-                                if (int(l[9])/int(l[10])) >= contaminant_pident
-                                and (int(l[3])-int(l[2])) >= (bait_size*contaminant_coverage)]
+                                if (int(l[9])/int(l[10])) >= exclude_pident
+                                and (int(l[3])-int(l[2])) >= (bait_size*exclude_coverage)]
 
         # remove probes and write final probe set
         baits = import_sequences(unique_baits)
@@ -823,13 +823,8 @@ def main(input_files, output_dir, bait_size, bait_offset,
                 total_counts.setdefault(i[0], []).append(i[1])
 
         total_counts = {k: sum(v) for k, v in total_counts.items()}
-
-        print('Depth of coverage: {0}'.format(str(total_counts)))
-
-#        depth_lines = [['{0}\t{1}\t{2}'.format(k, i, j) for i, j in v.items()]
-#                       for k, v in depth_values.items()]
-#        depth_file = os.path.join(output_dir, gbasename+'_depth.tsv')
-#        write_lines(depth_lines, depth_file)
+        print(gbasename)
+        print('Depth of coverage:\n{0}'.format('\n'.join(['{0}: {1}'.format(k, v) for k, v in total_counts.items()])))
 
         # merge overlapping intervals
         # deepcopy to avoid altering original intervals
@@ -840,6 +835,8 @@ def main(input_files, output_dir, bait_size, bait_offset,
         print('Breath of coverage: {0} ({1} bases)'.format(*coverage))
 
 
+# add option to determine if baits should be generated for uncovered regions
+# based on the length of the uncovered regions
 def parse_arguments():
 
     parser = argparse.ArgumentParser(description=__doc__,
@@ -847,71 +844,113 @@ def parse_arguments():
 
     parser.add_argument('-i', type=str, required=True,
                         dest='input_files',
-                        help='')
+                        help='Path to the directory with '
+                             'input FASTA files.')
 
     parser.add_argument('-o', type=str, required=True,
                         dest='output_dir',
-                        help='')
+                        help='Path to the output directory where '
+                             'files will be saved to (must not exist, '
+                             'process will create this directory).')
 
-    parser.add_argument('-bt', type=int, required=False,
-                        default=120,
-                        dest='bait_size',
-                        help='')
-
-    parser.add_argument('-bo', type=int, required=False,
-                        default=120,
-                        dest='bait_offset',
-                        help='')
+    parser.add_argument('--mc', type=int, required=False,
+                        default=360,
+                        dest='minlen_contig',
+                        help='Minimum contig length. Probes will '
+                             'not be created for contigs with a '
+                             'length value that is smaller than '
+                             'this value.')
 
     parser.add_argument('--nr', type=int, required=False,
-                        default=2,
+                        default=1,
                         dest='number_refs',
-                        help='')
+                        help='Number of genome assemblies that will '
+                             'be selected to create the initial set '
+                             'of probes (the process selects the '
+                             'assemblies with least contigs).')
+
+    parser.add_argument('--bs', type=int, required=False,
+                        default=120,
+                        dest='bait_size',
+                        help='Length of the probes that the process '
+                             'will create.')
+
+    parser.add_argument('--bo', type=int, required=False,
+                        default=120,
+                        dest='bait_offset',
+                        help='Start position offset between consecutive '
+                             'probes.')
 
     parser.add_argument('--bi', type=float, required=False,
                         default=1.0,
                         dest='bait_identity',
-                        help='')
+                        help='Minimum percent identity that '
+                             'aligned probes need to have when '
+                             'aligned against input genomes ('
+                             'probes with lower identity are '
+                             'not included in the set of probes '
+                             'that cover well regions of input '
+                             'genomes).')
+
+    parser.add_argument('--bc', type=float, required=False,
+                        default=1.0,
+                        dest='bait_coverage',
+                        help='Minimum percent length of the '
+                             'probe that has to align against the '
+                             'genome assembly (probes with lower '
+                             'coverage are not included in the set '
+                             'of probes that cover well regions of '
+                             'input genomes).')
 
     parser.add_argument('--c', required=False, action='store_true',
                         dest='cluster_probes',
-                        help='')
+                        help='Cluster set of probes after generating '
+                             'probes to cover all input assemblies. '
+                             'This clustering step will cluster '
+                             'similar probes and remove highly similar '
+                             'probes based on percent identity and '
+                             'coverage.')
 
     parser.add_argument('--ci', type=float, required=False,
                         default=1.0,
                         dest='cluster_identity',
-                        help='')
-
-    parser.add_argument('--mc', type=int, required=False,
-                        default=None,
-                        dest='minlen_contig',
-                        help='')
-
-    parser.add_argument('--cg', type=str, required=False,
-                        default=None,
-                        dest='contaminant_genome',
-                        help='')
-
-    parser.add_argument('--cp', type=float, required=False,
-                        default=0.8,
-                        dest='contaminant_pident',
-                        help='')
+                        help='Clustered probes with equal or higher '
+                             'percent identity are excluded.')
 
     parser.add_argument('--cc', type=float, required=False,
+                        default=1.0,
+                        dest='cluster_coverage',
+                        help='Clustered probes with equal or higher '
+                             'coverage may be excluded based on '
+                             'percent identity.')
+
+    parser.add_argument('--e', type=str, required=False,
+                        default=None,
+                        dest='exclude_regions',
+                        help='Path to a FASTA file with genomic regions '
+                             'that probes must not cover.')
+
+    parser.add_argument('--ep', type=float, required=False,
+                        default=0.8,
+                        dest='exclude_pident',
+                        help='Probes with percent identity equal or '
+                             'higher than this value to regions that '
+                             'must not be covered will be excluded.')
+
+    parser.add_argument('--ec', type=float, required=False,
                         default=0.5,
-                        dest='contaminant_coverage',
-                        help='')
+                        dest='exclude_coverage',
+                        help='Probes that map against the regions to '
+                             'exclude with equal or greater coverage '
+                             'may be excluded based on percent identity.')
 
     args = parser.parse_args()
 
-    args.minlen_contig = (args.minlen_contig
-                          if args.minlen_contig is not None
-                          else args.bait_size)
-
-    return [args.input_files, args.output_dir, args.bait_size,
-            args.bait_offset, args.number_refs, args.bait_identity,
-            args.cluster_probes, args.cluster_identity, args.minlen_contig,
-            args.contaminant_genome, args.contaminant_pident, args.contaminant_coverage]
+    return [args.input_files, args.output_dir, args.minlen_contig,
+            args.number_refs, args.bait_size, args.bait_offset,
+            args.bait_identity, args.bait_coverage, args.cluster_probes,
+            args.cluster_identity, args.cluster_coverage, args.exclude_regions,
+            args.exclude_pident, args.exclude_coverage]
 
 
 if __name__ == '__main__':
