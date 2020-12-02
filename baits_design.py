@@ -8,6 +8,8 @@ Created on Wed Nov 11 22:26:18 2020
 
 
 import os
+import re
+import sys
 import csv
 import math
 import shutil
@@ -451,7 +453,7 @@ def determine_breath_coverage(intervals, total_bases):
     covered_bases = 0
     for k, v in intervals.items():
         for e in v:
-            covered_bases += e[1] - e[0]
+            covered_bases += sum([1 for p, c in e[2].items() if c > 0])
 
     breath_coverage = covered_bases / total_bases
 
@@ -531,10 +533,19 @@ def merge_intervals(intervals):
     """
 
     merged = [deepcopy(intervals[0])]
-    for current in intervals:
+    for current in intervals[1:]:
         previous = merged[-1]
         if current[0] <= previous[1]:
             previous[1] = max(previous[1], current[1])
+            # merge coverage dictionaries
+            previous_cov = previous[2]
+            current_cov = current[2]
+            for k, v in current_cov.items():
+                if k not in previous_cov:
+                    previous_cov[k] = v
+                else:
+                    previous_cov[k] += v
+            previous[2] = previous_cov
         else:
             merged.append(deepcopy(current))
 
@@ -559,21 +570,22 @@ def determine_missing_intervals(intervals, identifier, total_len):
     return [missing_regions, not_covered]
 
 
-def cover_intervals(intervals, total_len, bait_size):
+def cover_intervals(intervals, total_len, bait_size, bait_region):
     """
     """
 
     cover_baits = []
     for i in intervals:
         span = i[1] - i[0]
-        if span < bait_size:
-            bait_interval = determine_small_bait(span, bait_size,
-                                                 i[0], i[1],
-                                                 total_len)
-            cover_baits.append(bait_interval)
-        elif span >= bait_size:
-            probes = determine_interval_baits(bait_size, i[0], i[1])
-            cover_baits.extend(probes)
+        if span >= bait_region:
+            if span < bait_size:
+                bait_interval = determine_small_bait(span, bait_size,
+                                                     i[0], i[1],
+                                                     total_len)
+                cover_baits.append(bait_interval)
+            elif span >= bait_size:
+                probes = determine_interval_baits(bait_size, i[0], i[1])
+                cover_baits.extend(probes)
 
     return cover_baits
 
@@ -585,33 +597,82 @@ def determine_depth_coverage(intervals, total_len):
     positions = list(range(0, total_len))
     positions_depth = {p: 0 for p in positions}
     for i in intervals:
-        current_range = list(range(i[0], i[1]))
-        for i in current_range:
-            positions_depth[i] += 1
+        for p, c in i[2].items():
+            positions_depth[p] += c
 
     counts = sorted(Counter(positions_depth.values()).most_common(), key= lambda x: x[0])
 
     return [positions_depth, counts]
 
 
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-#output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design'
-#bait_size = 120
-#bait_offset = 120
-#number_refs = 2 
-#bait_identity = 1.0
-#cluster_identity = 1.0
-#minlen_contig = bait_size * 2
+def regex_matcher(string, pattern):
+    """
+    """
+
+    matches = re.findall(pattern, string)
+
+    return matches
+
+
+# coverage_info = [':6', '-ata', ':10', '+gtc', ':4', '*at', ':3']
+# start = 1
+def single_position_coverage(coverage_info, start):
+    """
+    """
+
+    coverage = {}
+    for m in coverage_info:
+        if m[0] == ':':
+            new_cov = {i: 1 for i in range(start, start+int(m[1:]))}
+            coverage = {**coverage, **new_cov}
+            start = start + int(m[1:])
+        elif m[0] == '*':
+            coverage[start] = 0
+            start += 1
+        elif m[0] == '-':
+            new_cov = {i: 0 for i in range(start, start+len(m[1:]))}
+            coverage = {**coverage, **new_cov}
+            start = start +len(m[1:])
+        elif m[0] == '+':
+            pass
+
+    return coverage
+
+
+input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+bait_size = 120
+bait_offset = 120
+number_refs = 1
+bait_identity = 1.0
+bait_coverage = 1.0
+bait_region = 3
+cluster_identity = 1.0
+cluster_coverage = 1.0
+minlen_contig = bait_size * 2
+exclude_regions = None
 #exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-#exclude_pident = 0.8
-#exclude_coverage = 0.5
-#cluster_probes = False
+exclude_pident = 0.8
+exclude_coverage = 0.5
+cluster_probes = False
 
 
-def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
-         bait_offset, bait_identity, bait_coverage, cluster_probes,
-         cluster_identity, cluster_coverage, exclude_regions, exclude_pident,
-         exclude_coverage):
+# Add features to control depth of coverage of regions.
+# e.g.: duplicate coverage of regions only covered once.
+# cluster and remove highly similar baits to decrease coverage of
+# similar regions with high variability.
+
+
+def main(input_files, output_dir, minlen_contig, number_refs,
+         bait_size, bait_offset, bait_identity, bait_coverage, bait_region,
+         cluster_probes, cluster_identity, cluster_coverage,
+         exclude_regions, exclude_pident, exclude_coverage):
+
+    if os.path.isdir(output_dir) is False:
+        os.mkdir(output_dir)
+    else:
+        sys.exit('Output directory exists. Please provide a path '
+                 'for a directory that will be created to store files.')
 
     genomes = [os.path.join(input_files, file)
                for file in os.listdir(input_files)]
@@ -650,8 +711,11 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
         # read PAF file lines
         paf_lines = read_tabular(paf_path)
 
-        # filter out matches below bait length
-        valid_length = [line for line in paf_lines if int(line[10]) == bait_size]
+        # filter out matches below bait_coverage*bait_size
+        # length includes gaps due to deletions and might span more than query length
+        valid_length = [line
+                        for line in paf_lines
+                        if int(line[10]) >= (bait_coverage*bait_size)]
 
         # compute alignment identity
         for i in range(len(valid_length)):
@@ -660,10 +724,22 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
         # filter out alignments below defined identity
         valid_pident = [line for line in valid_length if line[-1] >= bait_identity]
 
+        # match alignment string with regex
+        pattern = r':[0-9]+|\*[a-z][a-z]|\+[a-z]+|-[a-z]+'
+        for i in range(len(valid_pident)):
+            current = valid_pident[i][-2]
+            valid_pident[i].append(regex_matcher(current, pattern))
+
+        # get information about positions that match to determine coverage
+        for i in range(len(valid_pident)):
+            current = valid_pident[i][-1]
+            start = int(valid_pident[i][7])
+            valid_pident[i].append(single_position_coverage(current, start))
+
         # identify subsequences that are well covered by baits
         covered_intervals = {}
         for l in valid_pident:
-            covered_intervals.setdefault(l[5], []).append([int(l[7]), int(l[8])])
+            covered_intervals.setdefault(l[5], []).append([int(l[7]), int(l[8]), l[-1]])
 
         # sort covered intervals
         covered_intervals_sorted = {k: sorted(v, key=lambda x: x[0])
@@ -671,6 +747,7 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
 
         # merge overlapping intervals
         # deepcopy to avoid altering original intervals
+        # needs some work!!!
         merged_intervals = {k: merge_intervals(v)
                             for k, v in covered_intervals_sorted.items()}
 
@@ -687,7 +764,7 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
         print('Bases not covered: {0}'.format(not_covered))
 
         # create baits for missing regions
-        missing_baits_intervals = {k: cover_intervals(v, len(contigs[k]), bait_size)
+        missing_baits_intervals = {k: cover_intervals(v, len(contigs[k]), bait_size, bait_region)
                                    for k, v in missing_regions.items()}
 
         extra_probes = {}
@@ -784,7 +861,7 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
 
     # determine breath of coverage for all assemblies
     # and depth of coverage for each base
-    for g in genomes:
+    for g in genomes[:-1]:
         gbasename = os.path.basename(g).split('.fasta')[0]
         paf_path = os.path.join(output_dir, gbasename+'_validation.paf')
 
@@ -793,7 +870,9 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
         paf_lines = read_tabular(paf_path)
 
         # filter out matches below bait length
-        valid_length = [line for line in paf_lines if int(line[10]) == bait_size]
+        valid_length = [line
+                        for line in paf_lines
+                        if int(line[10]) >= (bait_coverage*bait_size)]
 
         # compute alignment identity
         for i in range(len(valid_length)):
@@ -802,18 +881,39 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
         # filter out alignments below defined identity
         valid_pident = [line for line in valid_length if line[-1] >= bait_identity]
 
+        # match alignment string with regex
+        pattern = r':[0-9]+|\*[a-z][a-z]|\+[a-z]+|-[a-z]+'
+        for i in range(len(valid_pident)):
+            current = valid_pident[i][-2]
+            valid_pident[i].append(regex_matcher(current, pattern))
+
+        # get information about positions that match to determine coverage
+        for i in range(len(valid_pident)):
+            current = valid_pident[i][-1]
+            start = int(valid_pident[i][7])
+            valid_pident[i].append(single_position_coverage(current, start))
+
         # identify subsequences that are well covered by baits
         covered_intervals = {}
         for l in valid_pident:
-            covered_intervals.setdefault(l[5], []).append([int(l[7]), int(l[8])])
+            covered_intervals.setdefault(l[5], []).append([int(l[7]), int(l[8]), l[-1]])
 
         # sort covered intervals
         covered_intervals_sorted = {k: sorted(v, key=lambda x: x[0])
                                     for k, v in covered_intervals.items()}
 
+        merged_intervals = {k: merge_intervals(v)
+                            for k, v in covered_intervals_sorted.items()}
+
+        contigs = import_sequences(g)
+        total_bases = sum([len(v) for k, v in contigs.items()])
+        coverage = determine_breath_coverage(merged_intervals, total_bases)
+
+        # coverage values above 1.0 !!!
+        print('Breath of coverage: {0} ({1} bases)'.format(*coverage))
+
         # determine depth of coverage
         depth_values = {}
-        contigs = import_sequences(g)
         for k, v in covered_intervals_sorted.items():
             depth_values[k] = determine_depth_coverage(v, len(contigs[k]))
 
@@ -826,17 +926,7 @@ def main(input_files, output_dir, minlen_contig, number_refs, bait_size,
         print(gbasename)
         print('Depth of coverage:\n{0}'.format('\n'.join(['{0}: {1}'.format(k, v) for k, v in total_counts.items()])))
 
-        # merge overlapping intervals
-        # deepcopy to avoid altering original intervals
-        merged_intervals = {k: merge_intervals(v)
-                            for k, v in covered_intervals_sorted.items()}
 
-        coverage = determine_breath_coverage(merged_intervals, total_bases)
-        print('Breath of coverage: {0} ({1} bases)'.format(*coverage))
-
-
-# add option to determine if baits should be generated for uncovered regions
-# based on the length of the uncovered regions
 def parse_arguments():
 
     parser = argparse.ArgumentParser(description=__doc__,
@@ -902,6 +992,15 @@ def parse_arguments():
                              'of probes that cover well regions of '
                              'input genomes).')
 
+    parser.add_argument('--br', type=int, required=False,
+                        default=0,
+                        dest='bait_region',
+                        help='Uncovered regions must have a length '
+                             'value equal or greater than this value. '
+                             'If the uncovered region is smaller than '
+                             'this value the process will not generate '
+                             'new baits to cover that region.')
+
     parser.add_argument('--c', required=False, action='store_true',
                         dest='cluster_probes',
                         help='Cluster set of probes after generating '
@@ -948,9 +1047,9 @@ def parse_arguments():
 
     return [args.input_files, args.output_dir, args.minlen_contig,
             args.number_refs, args.bait_size, args.bait_offset,
-            args.bait_identity, args.bait_coverage, args.cluster_probes,
-            args.cluster_identity, args.cluster_coverage, args.exclude_regions,
-            args.exclude_pident, args.exclude_coverage]
+            args.bait_identity, args.bait_coverage, args.bait_region,
+            args.cluster_probes, args.cluster_identity, args.cluster_coverage,
+            args.exclude_regions, args.exclude_pident, args.exclude_coverage]
 
 
 if __name__ == '__main__':
