@@ -861,7 +861,7 @@ def main(input_files, output_dir, minlen_contig, number_refs,
 
     # determine breath of coverage for all assemblies
     # and depth of coverage for each base
-    for g in genomes[:-1]:
+    for g in genomes:
         gbasename = os.path.basename(g).split('.fasta')[0]
         paf_path = os.path.join(output_dir, gbasename+'_validation.paf')
 
