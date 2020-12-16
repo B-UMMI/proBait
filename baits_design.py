@@ -322,10 +322,10 @@ def determine_distinct(sequences_file, unique_fasta):
     """
 
     total = 0
-    seqs_dict = {}
-    out_limit = 10000
     out_seqs = []
+    seqs_dict = {}
     exausted = False
+    out_limit = 10000
     seq_generator = SeqIO.parse(sequences_file, 'fasta')
     while exausted is False:
         record = next(seq_generator, None)
@@ -357,7 +357,26 @@ def determine_distinct(sequences_file, unique_fasta):
 
 
 def run_minimap2(reference, map_fasta, output_file):
-    """
+    """ Executes minimap2 to map short sequences
+        to a reference genome.
+
+        Parameters
+        ----------
+        reference : str
+            Path to the FASTA file with the reference.
+        map_fasta : str
+            Path to FASTA file with the short sequences
+            to map against the reference.
+        output_file : str
+            Path to the output file with mapping results.
+
+        Returns
+        -------
+        List with following elements:
+            stdout : list
+                List with stdout from minimap2 in bytes.
+            stderr : list
+                List with the stderr from minimpa2 in bytes.
     """
 
     minimap_args = ['minimap2 -I 1G --cs -cx sr {0} {1} > '
@@ -375,7 +394,24 @@ def run_minimap2(reference, map_fasta, output_file):
 
 
 def create_mmseqs_db(input_file, output_db):
-    """
+    """ Executes MMseqs2 to create a database with
+        sequences in input FASTA file.
+
+        Parameters
+        ----------
+        input_file : str
+            Path to a FASTA file with DNA sequences.
+        output_db : str
+            Full path that includes prefix used for
+            all database files that are created.
+
+        Returns
+        -------
+        List with following elements:
+            db_stdout : list
+                List with the stdout from MMseqs2 in bytes.
+            db_stderr : list
+                List with the stderr from MMseqs2 in bytes.
     """
 
     mmseqs_args = ['mmseqs', 'createdb', input_file, output_db]
@@ -390,13 +426,37 @@ def create_mmseqs_db(input_file, output_db):
     return [db_stdout, db_stderr]
 
 
-def cluster_baits(database, cluster_db, temp_directory):
-    """
+def cluster_baits(database, cluster_db, temp_directory, threads):
+    """ Cluster sequences in a MMseqs2 database.
+
+        Parameters
+        ----------
+        database : str
+            Full path that includes prefix used for
+            database files.
+        cluster_db : str
+            Full path that includes prefix used for
+            files with clustering results.
+        temp_directory : str
+            Path to te temporary directory used to
+            store intermediate files.
+        threads : int
+            Number of threads used in the clustering
+            process.
+
+        Returns
+        -------
+        List with following elements:
+            stdout : list
+                List with the stdout from MMseqs2 in bytes.
+            stderr : list
+                List with the stderr from MMseqs2 in bytes.
     """
 
     # cluster
-    mmseqs_args = ['mmseqs', 'cluster', '--cov-mode', '0', '-c', '0.8',
-                   '--threads', '4', database, cluster_db, temp_directory]
+    mmseqs_args = ['mmseqs', 'cluster', '--cov-mode', '0', '-c',
+                   '0.8', '--threads', str(threads), database,
+                   cluster_db, temp_directory]
 
     mmseqs_proc = subprocess.Popen(mmseqs_args,
                                    stdout=subprocess.PIPE,
@@ -408,14 +468,38 @@ def cluster_baits(database, cluster_db, temp_directory):
     return [cluster_stdout, cluster_stderr]
 
 
-def align_clusters(database, cluster_db, align_db):
-    """
+def align_clusters(database, cluster_db, align_db, threads):
+    """ Aligns sequences in a MMseqs2 database against
+        clustering results from MMseqs2.
+
+        Parameters
+        ----------
+        database : str
+            Full path that includes prefix used for
+            database files.
+        cluster_db : str
+            Full path that includes prefix used for
+            files with clustering results.
+        align_db : str
+            Full path that includes prefix used for
+            files with alignment results.
+        threads : int
+            Number of threads used in the clustering
+            process.
+
+        Returns
+        -------
+        List with following elements:
+            align_stdout : list
+                List with the stdout from MMseqs2 in bytes.
+            align_stderr : list
+                List with the stderr from MMseqs2 in bytes.
     """
 
     # align to get identities
-    align_args = ['mmseqs', 'align', '--cov-mode', '0', '-c', '0.8',
-                  '--threads', '4', database, database, cluster_db,
-                  align_db, '-a']
+    align_args = ['mmseqs', 'align', '--cov-mode', '0', '-c',
+                  '0.8', '--threads', str(threads), database,
+                  database, cluster_db, align_db, '-a']
 
     align_proc = subprocess.Popen(align_args,
                                   stdout=subprocess.PIPE,
@@ -428,7 +512,29 @@ def align_clusters(database, cluster_db, align_db):
 
 
 def convert_alignmentDB(database, align_db, align_out):
-    """
+    """ Converts MMseqs2 alignment results into tabular format
+        to add identities and other alignment information to
+        clustering results.
+
+        Parameters
+        ----------
+        database : str
+            Full path that includes prefix used for
+            database files.
+        align_db : str
+            Full path that includes prefix used for
+            files with alignment results.
+        align_out : str
+            Path to the output file with the clustering
+            results in tabular format.
+
+        Returns
+        -------
+        List with following elements:
+            convert_stdout : list
+                List with the stdout from MMseqs2 in bytes.
+            convert_stderr : list
+                List with the stderr from MMseqs2 in bytes.
     """
 
     # convert output
@@ -446,7 +552,27 @@ def convert_alignmentDB(database, align_db, align_out):
 
 
 def determine_breath_coverage(intervals, total_bases):
-    """
+    """ Determines the percentage and total number of covered
+        bases according to a set of coverage intervals.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+        total_bases : int
+            Total number of bases in the reference.
+
+        Returns
+        -------
+        List with following elements:
+            breath_coverage : float
+                Percentage of covered bases.
+            covered_bases : int
+                Total number of covered bases.
     """
 
     # determine breath of coverage
@@ -461,7 +587,28 @@ def determine_breath_coverage(intervals, total_bases):
 
 
 def determine_small_bait(span, bait_size, start, stop, sequence_length):
-    """
+    """ Determines baits for regions shorter than bait length.
+
+        Parameters
+        ----------
+        span : int
+            Length of the region that is not covered.
+        bait_size : int
+            Bait size in bases.
+        start : int
+            Start position of the subsequence that is
+            not covered.
+        stop : int
+            Stop position of the subsequence that is
+            not covered.
+        sequence_length : int
+            Total length of the sequence.
+
+        Returns
+        -------
+        bait_interval : list
+            List with the start and stop position for
+            the determined bait.
     """
 
     rest = bait_size - span
@@ -480,11 +627,30 @@ def determine_small_bait(span, bait_size, start, stop, sequence_length):
 
 
 def determine_interval_baits(bait_size, start, stop):
-    """
+    """ Determines baits for regions with length value
+        equal or greater than bait size.
+
+        Parameters
+        ----------
+        bait_size : int
+            Bait size in bases.
+        start : int
+            Start position of the subsequence that is
+            not covered.
+        stop : int
+            Stop position of the subsequence that is
+            not covered.
+
+        Returns
+        -------
+        probes : list of list
+            List with one sublist per determined bait.
+            Each sublist has the start and stop position
+            for a bait.
     """
 
-    reach = False
     probes = []
+    reach = False
     while reach is False:
         if (start + bait_size) == stop:
             bait_interval = [start, stop]
@@ -503,7 +669,23 @@ def determine_interval_baits(bait_size, start, stop):
 
 
 def count_contigs(fasta, min_len):
-    """
+    """ Counts the number of records in a FASTA file.
+        Only counts sequences that are longer than a
+        specified minimum length.
+
+        Parameters
+        ----------
+        fasta : str
+            Path to a FASTA file.
+        min_len : int
+            Minimum sequence length. Sequences shorter
+            than this value are not counted.
+
+        Returns
+        -------
+        nr_contigs : int
+            Number of sequences in input FASTA file
+            (longer than specified minimum length).
     """
 
     contigs = [rec for rec in SeqIO.parse(fasta, 'fasta')
@@ -514,7 +696,27 @@ def count_contigs(fasta, min_len):
 
 
 def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
-    """
+    """ Generates baits for sequences in a FASTA file.
+
+        Parameters
+        ----------
+        fasta : str
+            Path to a FASTA file.
+        output_file : str
+            Path to the output FASTA file.
+        bait_size : int
+            Bait size in bases.
+        bait_offset : int
+            Position offset between start positions of
+            subsequent baits.
+        min_len : int
+            Sequence minimum length. Baits will not be
+            determined for sequences shorter than this
+            value.
+
+        Returns
+        -------
+        
     """
 
     sequences = import_sequences(fasta)
@@ -571,7 +773,27 @@ def determine_missing_intervals(intervals, identifier, total_len):
 
 
 def cover_intervals(intervals, total_len, bait_size, bait_region):
-    """
+    """ Determines baits to cover specified sequence regions.
+
+        Parameters
+        ----------
+        intervals : list
+            List of lists. Each sublist has start and stop
+            positions for sequence regions with no coverage.
+        total_len : int
+            Total length of the sequence.
+        bait_size : int
+            Bait size in bases.
+        bait_region : int
+            Minimum length of the region with no coverage.
+            Baits will not be determined to cover regions
+            that are shorter than this value.
+
+        Returns
+        -------
+        cover_baits : list
+            List of lists. Each sublist has the start and
+            stop positions for a bait.
     """
 
     cover_baits = []
@@ -654,7 +876,8 @@ exclude_regions = None
 #exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
 exclude_pident = 0.8
 exclude_coverage = 0.5
-cluster_probes = False
+cluster_probes = True
+threads = 4
 
 
 # Add features to control depth of coverage of regions.
@@ -664,9 +887,9 @@ cluster_probes = False
 
 
 def main(input_files, output_dir, minlen_contig, number_refs,
-         bait_size, bait_offset, bait_identity, bait_coverage, bait_region,
-         cluster_probes, cluster_identity, cluster_coverage,
-         exclude_regions, exclude_pident, exclude_coverage):
+         bait_size, bait_offset, bait_identity, bait_coverage,
+         bait_region, cluster_probes, cluster_identity, cluster_coverage,
+         exclude_regions, exclude_pident, exclude_coverage, threads):
 
     if os.path.isdir(output_dir) is False:
         os.mkdir(output_dir)
@@ -792,9 +1015,10 @@ def main(input_files, output_dir, minlen_contig, number_refs,
 
         os.mkdir(temp_directory)
         # clustering
-        cluster_std = cluster_baits(mmseqs_db, cluster_db, temp_directory)
+        cluster_std = cluster_baits(mmseqs_db, cluster_db,
+                                    temp_directory, threads)
         # align clusters
-        align_std = align_clusters(mmseqs_db, cluster_db, align_db)
+        align_std = align_clusters(mmseqs_db, cluster_db, align_db, threads)
         # convert alignments
         convert_std = convert_alignmentDB(mmseqs_db, align_db, align_out)
 
@@ -1042,6 +1266,10 @@ def parse_arguments():
                         help='Probes that map against the regions to '
                              'exclude with equal or greater coverage '
                              'may be excluded based on percent identity.')
+
+    parser.add_argument('--plot', required=False, action='store_true',
+                        dest='plot',
+                        help='')
 
     args = parser.parse_args()
 
