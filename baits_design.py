@@ -24,6 +24,7 @@ from collections import Counter
 from Bio import SeqIO
 import plotly.graph_objs as go
 from plotly.offline import plot
+from plotly.subplots import make_subplots
 
 
 def pickle_dumper(content, output_file):
@@ -551,7 +552,7 @@ def convert_alignmentDB(database, align_db, align_out):
     return [convert_stdout, convert_stderr]
 
 
-def determine_breath_coverage(intervals, total_bases):
+def determine_breadth_coverage(intervals, total_bases):
     """ Determines the percentage and total number of covered
         bases according to a set of coverage intervals.
 
@@ -569,21 +570,21 @@ def determine_breath_coverage(intervals, total_bases):
         Returns
         -------
         List with following elements:
-            breath_coverage : float
+            breadth_coverage : float
                 Percentage of covered bases.
             covered_bases : int
                 Total number of covered bases.
     """
 
-    # determine breath of coverage
+    # determine breadth of coverage
     covered_bases = 0
     for k, v in intervals.items():
         for e in v:
             covered_bases += sum([1 for p, c in e[2].items() if c > 0])
 
-    breath_coverage = covered_bases / total_bases
+    breadth_coverage = covered_bases / total_bases
 
-    return [breath_coverage, covered_bases]
+    return [breadth_coverage, covered_bases]
 
 
 def determine_small_bait(span, bait_size, start, stop, sequence_length):
@@ -716,7 +717,7 @@ def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
 
         Returns
         -------
-        
+        None
     """
 
     sequences = import_sequences(fasta)
@@ -728,16 +729,36 @@ def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
     baits = flatten_list(baits)
 
     write_lines(baits, output_file)
+    
+    return len(baits)
 
 
 def merge_intervals(intervals):
-    """
+    """ Merges intersecting intervals.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+
+        Returns
+        -------
+        merged : list
+            Dictionary with the result of merging intervals
+            that overlapped (coverage data is updated and
+            incremented for positions in common).
     """
 
     merged = [deepcopy(intervals[0])]
     for current in intervals[1:]:
         previous = merged[-1]
+        # current and previous intervals intersect
         if current[0] <= previous[1]:
+            # determine top position
             previous[1] = max(previous[1], current[1])
             # merge coverage dictionaries
             previous_cov = previous[2]
@@ -748,6 +769,7 @@ def merge_intervals(intervals):
                 else:
                     previous_cov[k] += v
             previous[2] = previous_cov
+        # current and previous intervals do not intersect
         else:
             merged.append(deepcopy(current))
 
@@ -755,7 +777,32 @@ def merge_intervals(intervals):
 
 
 def determine_missing_intervals(intervals, identifier, total_len):
-    """
+    """ Determines sequence intervals that are not covered by any
+        probes.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+        identifier : str
+            Sequence identifier.
+        total_len : int
+            Total length of the sequence.
+
+        Returns
+        -------
+        List with following elements:
+            missing_regions : dict
+                Dictionary with sequence identifiers as keys
+                a list of lists as values. Each sublist has
+                the start and stop positions for a sequence
+                interval that is not covered by probes.
+            not_covered : int
+                Total number of bases not covered by probes.
     """
 
     start = 0
@@ -813,22 +860,63 @@ def cover_intervals(intervals, total_len, bait_size, bait_region):
 
 
 def determine_depth_coverage(intervals, total_len):
-    """
+    """ Determine depth of coverage for a sequence.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+        total_len : int
+            Total length of the sequence.
+
+        Returns
+        -------
+        List with following elements:
+            positions_depth : dict
+                Dictonary with sequence positions and keys
+                and coverage for each position as values.
+            counts : dict
+                Dictionary with coverage values as keys and
+                the total number of positions with that coverage
+                value as values.
     """
 
+    # create dictionary to add coverage for all positions
     positions = list(range(0, total_len))
     positions_depth = {p: 0 for p in positions}
+    # increment coverage values based on intervals
     for i in intervals:
         for p, c in i[2].items():
             positions_depth[p] += c
 
-    counts = sorted(Counter(positions_depth.values()).most_common(), key= lambda x: x[0])
+    # determine coverage distribution
+    counts = sorted(Counter(positions_depth.values()).most_common(),
+                    key=lambda x: x[0])
 
     return [positions_depth, counts]
 
 
 def regex_matcher(string, pattern):
-    """
+    """ Finds substrings that match a regex pattern.
+
+        Parameters
+        ----------
+        string : str
+            Input string.
+        pattern : str
+            Pattern to match. Patterns should
+            include 'r' before string to match
+            or characters after backslashes will
+            be escaped.
+
+        Returns
+        -------
+        matches : list
+            List with substrings that matched the pattern.
     """
 
     matches = re.findall(pattern, string)
@@ -839,95 +927,95 @@ def regex_matcher(string, pattern):
 # coverage_info = [':6', '-ata', ':10', '+gtc', ':4', '*at', ':3']
 # start = 1
 def single_position_coverage(coverage_info, start):
-    """
+    """ Determine if positions in a subsequence are
+        covered based on information in the cs field
+        in a PAF file created by minimpa2.
+
+        Parameters
+        ----------
+        coverage_info : list
+            List with subsequent operations extracted
+            from the cd field in a PAF file created by
+            minimap2.
+        start : int
+            Subsequence start position in the complete
+            sequence.
+
+        Returns
+        -------
+        coverage : dict
+            Dictionary with sequence positions as keys
+            and coverage for each position as values.
     """
 
     coverage = {}
     for m in coverage_info:
+        # subsequence part with exact matches
         if m[0] == ':':
+            # create dctionary entries with coverage = 1
             new_cov = {i: 1 for i in range(start, start+int(m[1:]))}
             coverage = {**coverage, **new_cov}
+            # increment start position
             start = start + int(m[1:])
+        # position with substitution
         elif m[0] == '*':
             coverage[start] = 0
             start += 1
+        # position with deletion
         elif m[0] == '-':
+            # coverage 0 for missing bases
             new_cov = {i: 0 for i in range(start, start+len(m[1:]))}
             coverage = {**coverage, **new_cov}
-            start = start +len(m[1:])
+            start = start + len(m[1:])
+        # insertion
         elif m[0] == '+':
+            # do not add coverage values for positions because
+            # insertion does not exist in reference
             pass
 
     return coverage
 
 
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
-bait_size = 120
-bait_offset = 120
-number_refs = 1
-bait_identity = 1.0
-bait_coverage = 1.0
-bait_region = 3
-cluster_identity = 1.0
-cluster_coverage = 1.0
-minlen_contig = bait_size * 2
-exclude_regions = None
-#exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-exclude_pident = 0.8
-exclude_coverage = 0.5
-cluster_probes = True
-threads = 4
+def common_suffixes(strings):
+    """
+    """
+
+    splitted = [os.path.basename(s).split('.') for s in strings]
+    common = set(splitted[0]).intersection(*splitted[1:])
+    filtered = [[e for e in s if e not in common] for s in splitted]
+    joined = {strings[i]: '.'.join(filtered[i]) for i in range(len(filtered))}
+
+    return joined
 
 
-# Add features to control depth of coverage of regions.
-# e.g.: duplicate coverage of regions only covered once.
-# cluster and remove highly similar baits to decrease coverage of
-# similar regions with high variability.
+def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
+                               bait_coverage, bait_identity, bait_region,
+                               generate=False, depth=False):
+    """
+    """
 
+    # determine common suffixes to shorten length of samples name
+    short_samples = common_suffixes(genomes)
 
-def main(input_files, output_dir, minlen_contig, number_refs,
-         bait_size, bait_offset, bait_identity, bait_coverage,
-         bait_region, cluster_probes, cluster_identity, cluster_coverage,
-         exclude_regions, exclude_pident, exclude_coverage, threads):
-
-    if os.path.isdir(output_dir) is False:
-        os.mkdir(output_dir)
+    if generate is True:
+        header = ('{0:<30}  {1:^10}  {2:^10}  {3:^10}  '
+                  '{4:^7}'. format('sample', '%cov', '#cov', '#uncov', '+baits'))
     else:
-        sys.exit('Output directory exists. Please provide a path '
-                 'for a directory that will be created to store files.')
+        header = ('{0:<30}  {1:^10}  {2:^10}  '
+                  '{3:^10}'. format('sample', '%cov', '#cov', '#uncov'))
 
-    genomes = [os.path.join(input_files, file)
-               for file in os.listdir(input_files)]
+    print('-'*len(header))
+    print(header)
+    print('-'*len(header))
 
-    nr_contigs = [[f, count_contigs(f, minlen_contig)] for f in genomes]
-
-    # select assemblies with lowest number of contigs
-    nr_contigs = sorted(nr_contigs, key=lambda x: x[1])
-    ref_set = [t[0] for t in nr_contigs[0:number_refs]]
-    map_set = list(set(genomes) - set(ref_set))
-    map_set.sort()
-
-    # shred genomic sequences
-    # not generating kmers that cover the end of the sequences!
-    baits_file = os.path.join(output_dir, 'baits.fasta')
-    for g in ref_set:
-        generate_baits(g, baits_file, bait_size, bait_offset, minlen_contig)
-
-    # identify unique baits
-    unique_baits = os.path.join(output_dir, 'unique_baits.fasta')
-    total, unique_seqids = determine_distinct(baits_file, unique_baits)
-    print('Removed {0} repeated probes.'.format(total))
-
-    # start mapping baits against remaining genomes
-    # mapping against ref_set to cover missing regions
+    total = 0
+    coverage_info = {}
     for g in genomes:
-    #for g in map_set:
-        contigs = import_sequences(g)
-        total_bases = sum([len(v) for k, v in contigs.items()])
-
         gbasename = os.path.basename(g).split('.fasta')[0]
         paf_path = os.path.join(output_dir, gbasename+'.paf')
+
+        contigs = import_sequences(g)
+        total_bases = sum([len(v) for k, v in contigs.items()])
 
         minimap_std = run_minimap2(g, unique_baits, paf_path)
 
@@ -970,12 +1058,10 @@ def main(input_files, output_dir, minlen_contig, number_refs,
 
         # merge overlapping intervals
         # deepcopy to avoid altering original intervals
-        # needs some work!!!
         merged_intervals = {k: merge_intervals(v)
                             for k, v in covered_intervals_sorted.items()}
 
-        coverage = determine_breath_coverage(merged_intervals, total_bases)
-        print('Breath of coverage: {0} ({1} bases)'.format(*coverage))
+        coverage = determine_breadth_coverage(merged_intervals, total_bases)
 
         # determine subsequences that are not covered
         missing = [determine_missing_intervals(v, k, len(contigs[k]))
@@ -984,171 +1070,331 @@ def main(input_files, output_dir, minlen_contig, number_refs,
         missing_regions = {k: v for i in missing for k, v in i[0].items()}
         not_covered = sum([i[1] for i in missing])
 
-        print('Bases not covered: {0}'.format(not_covered))
+        coverage_info[gbasename] = [*coverage, not_covered]
 
         # create baits for missing regions
-        missing_baits_intervals = {k: cover_intervals(v, len(contigs[k]), bait_size, bait_region)
-                                   for k, v in missing_regions.items()}
+        if generate is True:
+            missing_baits_intervals = {k: cover_intervals(v, len(contigs[k]), bait_size, bait_region)
+                                       for k, v in missing_regions.items()}
 
-        extra_probes = {}
-        for k, v in missing_baits_intervals.items():
-            extra_probes[k] = ['>{0}_{1}\n{2}'.format(k, e[0], contigs[k][e[0]:e[1]]) for e in v]
+            extra_probes = {}
+            for k, v in missing_baits_intervals.items():
+                extra_probes[k] = ['>{0}_{1}\n{2}'.format(k, e[0], contigs[k][e[0]:e[1]]) for e in v]
 
-        new_baits_lines = [v for k, v in extra_probes.items()]
-        new_baits_lines = flatten_list(new_baits_lines)
+            new_baits_lines = [v for k, v in extra_probes.items()]
+            new_baits_lines = flatten_list(new_baits_lines)
 
-        write_lines(new_baits_lines, unique_baits)
-        print('Added {0} baits from genome {1}'.format(len(new_baits_lines), g))
+            write_lines(new_baits_lines, unique_baits)
+
+            coverage_info[gbasename].append(len(new_baits_lines))
+            total += len(new_baits_lines)
+
+            print('{0:<30}  {1:^10.4f}  {2:^10}  {3:^10}  '
+                  '{4:^7}'.format(short_samples[g], coverage[0],
+                                  coverage[1], not_covered,
+                                  len(new_baits_lines)))
+
+        if depth is True:
+            # determine depth of coverage
+            depth_values = {}
+            for k, v in covered_intervals_sorted.items():
+                depth_values[k] = determine_depth_coverage(v, len(contigs[k]))
+
+            total_counts = {}
+            for k, v in depth_values.items():
+                for i in v[1]:
+                    total_counts.setdefault(i[0], []).append(i[1])
+
+            total_counts = {k: sum(v) for k, v in total_counts.items()}
+
+            coverage_info[gbasename].extend([depth_values, total_counts])
+
+        if generate is False:
+            print('{0:<30}  {1:^10.4f}  {2:^10}  '
+                  '{3:^10}'.format(short_samples[g], coverage[0],
+                                   coverage[1], not_covered))
+
+    print('-'*len(header))
+
+    return [coverage_info, total]
+
+
+def exclude_similar_probes(unique_baits, output_dir, cluster_identity, threads):
+    """
+    """
+
+    print('Clustering probes...')
+    # cluster baits and remove based on similarity threshold
+    # create database
+    mmseqs_db = os.path.join(output_dir, 'mmseqs_db')
+    mmseqs_std = create_mmseqs_db(unique_baits, mmseqs_db)
+
+    # output paths
+    cluster_db = os.path.join(output_dir, 'clusters')
+    temp_directory = os.path.join(output_dir, 'tmp')
+    align_db = os.path.join(output_dir, 'alignDB')
+    align_out = os.path.join(output_dir, 'alignOUT')
+
+    os.mkdir(temp_directory)
+    # clustering
+    cluster_std = cluster_baits(mmseqs_db, cluster_db,
+                                temp_directory, threads)
+    # align clusters
+    align_std = align_clusters(mmseqs_db, cluster_db, align_db, threads)
+    # convert alignments
+    convert_std = convert_alignmentDB(mmseqs_db, align_db, align_out)
+
+    # read clustering results
+    cluster_lines = read_tabular(align_out)
+    clusters = {}
+    # pident at index 2
+    for l in cluster_lines:
+        clusters.setdefault(l[0], []).append([l[1], l[2]])
+
+    # exclude clusters with only the representative
+    clusters = {k: v for k, v in clusters.items() if len(v) > 1}
+
+    # remove representatives from clusters
+    clusters = {k: [e for e in v if e[0] != k]
+                for k, v in clusters.items()}
+
+    # get identifiers of baits with identity above threshold
+    exclude = [[e for e in v if float(e[1]) >= cluster_identity]
+               for k, v in clusters.items()]
+    exclude = flatten_list(exclude)
+    excluded_seqids = [e[0] for e in exclude]
+    print('Excluded {0} probes highly similar to other '
+          'probes.'.format(len(excluded_seqids)))
+
+    # create FASTA without excluded baits
+    baits = import_sequences(unique_baits)
+    baits = {k: v for k, v in baits.items() if k not in excluded_seqids}
+
+    baits_records = ['>{0}\n{1}'.format(k, v) for k, v in baits.items()]
+    filtered_baits = os.path.join(output_dir, 'filtered_baits')
+    write_lines(baits_records, filtered_baits)
+
+    return filtered_baits
+
+
+def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
+                        exclude_coverage, bait_size, output_dir):
+    """
+    """
+
+    print('Mapping against  and removing similar probes...')
+    # map against target genome that baits should not be specific for
+    gbasename = os.path.basename(exclude_regions).split('.fna')[0]
+    paf_path = os.path.join(output_dir, gbasename+'.paf')
+    minimap_std = run_minimap2(exclude_regions, unique_baits, paf_path)
+
+    # import mapping results
+    mapped_probes = read_tabular(paf_path)
+    multispecific_probes = [l[0] for l in mapped_probes
+                            if (int(l[9])/int(l[10])) >= exclude_pident
+                            and (int(l[3])-int(l[2])) >= (bait_size*exclude_coverage)]
+
+    # remove probes and write final probe set
+    baits = import_sequences(unique_baits)
+    baits = {k: v for k, v in baits.items() if k not in multispecific_probes}
+
+    print('Removed {0} probes similar with contaminant '
+          'genome.'.format(len(multispecific_probes)))
+
+    baits_records = ['>{0}\n{1}'.format(k, v) for k, v in baits.items()]
+    final_baits = os.path.join(output_dir, 'final_baits.fasta')
+    write_lines(baits_records, final_baits)
+
+    return final_baits
+
+
+def write_depth(identifier, depth_values, output_dir):
+    """
+    """
+
+    depth_file = os.path.join(output_dir, identifier+'_depth.tsv')
+    depth_lines = []
+    for k, v in depth_values.items():
+        depth_lines.append(k)
+        depth_lines.extend(['{0}\t{1}'.format(p, e) for p, e in v[0].items()])
+
+    write_lines(depth_lines, depth_file)
+
+    return depth_file
+
+
+def coverage_bars(coverage_values, output_dir):
+    """
+    """
+
+    short_samples = common_suffixes(list(coverage_values.keys()))
+
+    output_plot = os.path.join(output_dir, 'breadth_of_coverage.html')
+
+    x_values = []
+    y_labels = []
+    for k, v in coverage_values.items():
+        x_values.append(v)
+        y_labels.append(short_samples[k])
+
+    tracer = go.Bar(x=x_values,
+                    y=y_labels,
+                    orientation='h',
+                    marker=dict(color='#c6dbef',
+                                line=dict(color='#252525', width=2)),
+                    width=[0.6]*len(y_labels))
+
+    fig = go.Figure()
+    fig.add_trace(tracer)
+
+    fig.update_layout(title='Breadth of coverage')
+
+    plot(fig, filename=output_plot, auto_open=False)
+
+
+def depth_hists(depth_values, output_dir):
+    """
+    """
+
+    short_samples = common_suffixes(list(depth_values.keys()))
+
+    output_plot = os.path.join(output_dir, 'depth_of_coverage.html')
+
+    nr_rows = math.ceil(len(depth_values) / 3)
+    fig = make_subplots(rows=nr_rows, cols=3,
+                        subplot_titles=list(short_samples.values()))
+
+    tracers = []
+    for k, v in depth_values.items():
+        x_values = list(v.keys())
+        y_values = list(v.values())
+        tracer = go.Bar(x=x_values,
+                        y=y_values,
+                        marker=dict(color='#67a9cf'),
+                        showlegend=False)
+        tracers.append(tracer)
+
+    r = 1
+    c = 1
+    for t in tracers:
+        fig.add_trace(t, row=r, col=c)
+        c += 1
+        if c > 3:
+            r += 1
+            c = 1
+
+    fig.update_layout(title='Depth of coverage')
+    fig.update_yaxes(type='log')
+    plot(fig, filename=output_plot, auto_open=False)
+
+
+input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+bait_size = 120
+bait_offset = 120
+number_refs = 1
+bait_identity = 1.0
+bait_coverage = 1.0
+bait_region = 3
+cluster_identity = 1.0
+cluster_coverage = 1.0
+minlen_contig = bait_size * 2
+exclude_regions = None
+#exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
+exclude_pident = 0.8
+exclude_coverage = 0.5
+cluster_probes = False
+threads = 4
+
+
+# Add features to control depth of coverage of regions.
+# e.g.: duplicate coverage of regions only covered once.
+# cluster and remove highly similar baits to decrease coverage of
+# similar regions with high variability.
+
+
+def main(input_files, output_dir, minlen_contig, number_refs,
+         bait_size, bait_offset, bait_identity, bait_coverage,
+         bait_region, cluster_probes, cluster_identity, cluster_coverage,
+         exclude_regions, exclude_pident, exclude_coverage, threads):
+
+    if os.path.isdir(output_dir) is False:
+        os.mkdir(output_dir)
+    else:
+        sys.exit('Output directory exists. Please provide a path '
+                 'for a directory that will be created to store files.')
+
+    genomes = [os.path.join(input_files, file)
+               for file in os.listdir(input_files)]
+
+    nr_contigs = [[f, count_contigs(f, minlen_contig)] for f in genomes]
+
+    # select assemblies with lowest number of contigs
+    nr_contigs = sorted(nr_contigs, key=lambda x: x[1])
+    ref_set = [t[0] for t in nr_contigs[0:number_refs]]
+    map_set = list(set(genomes) - set(ref_set))
+    map_set.sort()
+
+    # shred genomic sequences
+    # not generating kmers that cover the end of the sequences!
+    baits_file = os.path.join(output_dir, 'baits.fasta')
+    for g in ref_set:
+        nr_baits = generate_baits(g, baits_file, bait_size,
+                                  bait_offset, minlen_contig)
+
+    print('\nCreated initial set of {0} probes based on {1} '
+          'assemblies.'.format(nr_baits, number_refs))
+
+    # identify unique baits
+    unique_baits = os.path.join(output_dir, 'unique_baits.fasta')
+    total, unique_seqids = determine_distinct(baits_file, unique_baits)
+    print('Removed {0} repeated probes.\n'.format(total))
+
+    # start mapping baits against remaining genomes
+    # mapping against ref_set to cover missing regions
+    coverage_info = incremental_bait_generator(genomes, unique_baits,
+                                               output_dir, bait_size,
+                                               bait_coverage, bait_identity,
+                                               bait_region, generate=True,
+                                               depth=False)
+
+    print('Added {0} probes to cover {1} assemblies.\nTotal '
+          'of {2} probes.'.format(coverage_info[1], len(genomes), nr_baits+coverage_info[1]))
 
     if cluster_probes is True:
-        print('Clustering probes...')
-        # cluster baits and remove based on similarity threshold
-        # create database
-        mmseqs_db = os.path.join(output_dir, 'mmseqs_db')
-        mmseqs_std = create_mmseqs_db(unique_baits, mmseqs_db)
-
-        # output paths
-        cluster_db = os.path.join(output_dir, 'clusters')
-        temp_directory = os.path.join(output_dir, 'tmp')
-        align_db = os.path.join(output_dir, 'alignDB')
-        align_out = os.path.join(output_dir, 'alignOUT')
-
-        os.mkdir(temp_directory)
-        # clustering
-        cluster_std = cluster_baits(mmseqs_db, cluster_db,
-                                    temp_directory, threads)
-        # align clusters
-        align_std = align_clusters(mmseqs_db, cluster_db, align_db, threads)
-        # convert alignments
-        convert_std = convert_alignmentDB(mmseqs_db, align_db, align_out)
-
-        # read clustering results
-        cluster_lines = read_tabular(align_out)
-        clusters = {}
-        # pident at index 2
-        for l in cluster_lines:
-            clusters.setdefault(l[0], []).append([l[1], l[2]])
-
-        # exclude clusters with only the representative
-        clusters = {k: v for k, v in clusters.items() if len(v) > 1}
-
-        # remove representatives from clusters
-        clusters = {k: [e for e in v if e[0] != k]
-                    for k, v in clusters.items()}
-
-        # get identifiers of baits with identity above threshold
-        exclude = [[e for e in v if float(e[1]) >= cluster_identity]
-                   for k, v in clusters.items()]
-        exclude = flatten_list(exclude)
-        excluded_seqids = [e[0] for e in exclude]
-        print('Excluded {0} probes highly similar to other '
-              'probes.'.format(len(excluded_seqids)))
-
-        # create FASTA without excluded baits
-        baits = import_sequences(unique_baits)
-        baits = {k: v for k, v in baits.items() if k not in excluded_seqids}
-
-        baits_records = ['>{0}\n{1}'.format(k, v) for k, v in baits.items()]
-        filtered_baits = os.path.join(output_dir, 'filtered_baits')
-        write_lines(baits_records, filtered_baits)
-
-        unique_baits = filtered_baits
+        clustering_dir = os.path.join(output_dir, 'clustering')
+        os.mkdir(clustering_dir)
+        unique_baits, removed = exclude_similar_probes(unique_baits, clustering_dir,
+                                                       cluster_identity, threads)
 
     if exclude_regions is not None:
-        print('Mapping against  and removing similar probes...')
-        # map against target genome that baits should not be specific for
-        gbasename = os.path.basename(exclude_regions).split('.fna')[0]
-        paf_path = os.path.join(output_dir, gbasename+'.paf')
-        minimap_std = run_minimap2(exclude_regions, unique_baits, paf_path)
+        exclude_dir = os.path.join(output_dir, 'exclude')
+        os.mkdir(exclude_dir)
+        unique_baits, removed = exclude_contaminant(unique_baits, exclude_regions,
+                                                    exclude_pident, exclude_coverage,
+                                                    bait_size, exclude_dir)
 
-        # import mapping results
-        mapped_probes = read_tabular(paf_path)
-        multispecific_probes = [l[0] for l in mapped_probes
-                                if (int(l[9])/int(l[10])) >= exclude_pident
-                                and (int(l[3])-int(l[2])) >= (bait_size*exclude_coverage)]
-
-        # remove probes and write final probe set
-        baits = import_sequences(unique_baits)
-        baits = {k: v for k, v in baits.items() if k not in multispecific_probes}
-
-        print('Removed {0} probes similar with contaminant '
-              'genome.'.format(len(multispecific_probes)))
-
-        baits_records = ['>{0}\n{1}'.format(k, v) for k, v in baits.items()]
-        final_baits = os.path.join(output_dir, 'final_baits.fasta')
-        write_lines(baits_records, final_baits)
-
-        unique_baits = final_baits
-
-    print('Generated {0} probes from {1} input assemblies.'
-          ''.format(len(list(SeqIO.parse(unique_baits, 'fasta'))), len(genomes)))
-
-    # determine breath of coverage for all assemblies
+    # determine breadth of coverage for all assemblies
     # and depth of coverage for each base
-    for g in genomes:
-        gbasename = os.path.basename(g).split('.fasta')[0]
-        paf_path = os.path.join(output_dir, gbasename+'_validation.paf')
+    final_info = incremental_bait_generator(genomes, unique_baits, output_dir,
+                                            bait_size, bait_coverage,
+                                            bait_identity, bait_region,
+                                            generate=False, depth=True)
 
-        minimap_std = run_minimap2(g, unique_baits, paf_path)
+    # save depth values
+    depth_files_dir = os.path.join(output_dir, 'depth_files')
+    os.mkdir(depth_files_dir)
+    depth_files = [write_depth(k, v[3], depth_files_dir) for k, v in final_info[0].items()]
 
-        paf_lines = read_tabular(paf_path)
+    # create plots
+    plots_dir = os.path.join(output_dir, 'plots')
+    os.mkdir(plots_dir)
 
-        # filter out matches below bait length
-        valid_length = [line
-                        for line in paf_lines
-                        if int(line[10]) >= (bait_coverage*bait_size)]
+    # bar plot with breadth of coverage
+    coverage_bars({k: v[0] for k, v in final_info[0].items()}, plots_dir)
 
-        # compute alignment identity
-        for i in range(len(valid_length)):
-            valid_length[i].append(int(valid_length[i][9]) / int(valid_length[i][10]))
-
-        # filter out alignments below defined identity
-        valid_pident = [line for line in valid_length if line[-1] >= bait_identity]
-
-        # match alignment string with regex
-        pattern = r':[0-9]+|\*[a-z][a-z]|\+[a-z]+|-[a-z]+'
-        for i in range(len(valid_pident)):
-            current = valid_pident[i][-2]
-            valid_pident[i].append(regex_matcher(current, pattern))
-
-        # get information about positions that match to determine coverage
-        for i in range(len(valid_pident)):
-            current = valid_pident[i][-1]
-            start = int(valid_pident[i][7])
-            valid_pident[i].append(single_position_coverage(current, start))
-
-        # identify subsequences that are well covered by baits
-        covered_intervals = {}
-        for l in valid_pident:
-            covered_intervals.setdefault(l[5], []).append([int(l[7]), int(l[8]), l[-1]])
-
-        # sort covered intervals
-        covered_intervals_sorted = {k: sorted(v, key=lambda x: x[0])
-                                    for k, v in covered_intervals.items()}
-
-        merged_intervals = {k: merge_intervals(v)
-                            for k, v in covered_intervals_sorted.items()}
-
-        contigs = import_sequences(g)
-        total_bases = sum([len(v) for k, v in contigs.items()])
-        coverage = determine_breath_coverage(merged_intervals, total_bases)
-
-        # coverage values above 1.0 !!!
-        print('Breath of coverage: {0} ({1} bases)'.format(*coverage))
-
-        # determine depth of coverage
-        depth_values = {}
-        for k, v in covered_intervals_sorted.items():
-            depth_values[k] = determine_depth_coverage(v, len(contigs[k]))
-
-        total_counts = {}
-        for k, v in depth_values.items():
-            for i in v[1]:
-                total_counts.setdefault(i[0], []).append(i[1])
-
-        total_counts = {k: sum(v) for k, v in total_counts.items()}
-        print(gbasename)
-        print('Depth of coverage:\n{0}'.format('\n'.join(['{0}: {1}'.format(k, v) for k, v in total_counts.items()])))
+    # depth of coverage values distribution and line plot
+    depth_hists({k: v[4] for k, v in final_info[0].items()}, plots_dir)
 
 
 def parse_arguments():
@@ -1273,15 +1519,11 @@ def parse_arguments():
 
     args = parser.parse_args()
 
-    return [args.input_files, args.output_dir, args.minlen_contig,
-            args.number_refs, args.bait_size, args.bait_offset,
-            args.bait_identity, args.bait_coverage, args.bait_region,
-            args.cluster_probes, args.cluster_identity, args.cluster_coverage,
-            args.exclude_regions, args.exclude_pident, args.exclude_coverage]
+    return args
 
 
 if __name__ == '__main__':
 
     args = parse_arguments()
 
-    main(*args)
+    main(**vars(args))
