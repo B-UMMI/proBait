@@ -19,7 +19,9 @@ import argparse
 import itertools
 import subprocess
 from copy import deepcopy
+from itertools import groupby
 from collections import Counter
+from operator import itemgetter
 
 from Bio import SeqIO
 import plotly.graph_objs as go
@@ -1288,23 +1290,65 @@ def depth_hists(depth_values, output_dir):
     plot(fig, filename=output_plot, auto_open=False)
 
 
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
-bait_size = 120
-bait_offset = 120
-number_refs = 1
-bait_identity = 1.0
-bait_coverage = 1.0
-bait_region = 3
-cluster_identity = 1.0
-cluster_coverage = 1.0
-minlen_contig = bait_size * 2
-exclude_regions = None
-#exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-exclude_pident = 0.8
-exclude_coverage = 0.5
-cluster_probes = False
-threads = 4
+def depth_lines(depth_values, output_dir):
+    """
+    """
+
+    short_samples = common_suffixes(list(depth_values.keys()))
+
+    output_plot = os.path.join(output_dir, 'depth_per_position.html')
+
+    fig = make_subplots(rows=len(depth_values), cols=1,
+                        subplot_titles=list(short_samples.values()))
+
+    tracers = []
+    for k, v in depth_values.items():
+        x_values = []
+        y_values = []
+        start = 0
+        for p, c in v.items():
+            values_groups = [list(j) for i, j in groupby(c[0].values())]
+            for g in values_groups:
+                start_x = start
+                stop_x = start_x + len(g)
+                start += len(g)
+
+                x_values.extend([start_x, stop_x])
+                y_values.extend([g[0], g[0]])
+
+        tracer = go.Scatter(x=x_values,
+                            y=y_values,
+                            showlegend=False,
+                            mode='lines',
+                            line=dict(color='#3690c0', width=1))
+        tracers.append(tracer)
+
+    r = 1
+    for t in tracers:
+        fig.add_trace(t, row=r, col=1)
+        r += 1
+
+    fig.update_layout(title='Depth per position', height=200*len(tracers))
+    plot(fig, filename=output_plot, auto_open=False, validate=False)
+
+
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+#output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+#bait_size = 120
+#bait_offset = 120
+#number_refs = 1
+#bait_identity = 1.0
+#bait_coverage = 1.0
+#bait_region = 3
+#cluster_identity = 1.0
+#cluster_coverage = 1.0
+#minlen_contig = bait_size * 2
+#exclude_regions = None
+##exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
+#exclude_pident = 0.8
+#exclude_coverage = 0.5
+#cluster_probes = False
+#threads = 4
 
 
 # Add features to control depth of coverage of regions.
@@ -1312,11 +1356,16 @@ threads = 4
 # cluster and remove highly similar baits to decrease coverage of
 # similar regions with high variability.
 
+# order contigs before determining line plot with positions intervals depth of coverage
+# determine length of subsequences with 0 coverage and etc
+# add distribution of depth values as subplot next to the depth per position!
+
 
 def main(input_files, output_dir, minlen_contig, number_refs,
          bait_size, bait_offset, bait_identity, bait_coverage,
          bait_region, cluster_probes, cluster_identity, cluster_coverage,
-         exclude_regions, exclude_pident, exclude_coverage, threads):
+         exclude_regions, exclude_pident, exclude_coverage, threads,
+         plot):
 
     if os.path.isdir(output_dir) is False:
         os.mkdir(output_dir)
@@ -1393,8 +1442,11 @@ def main(input_files, output_dir, minlen_contig, number_refs,
     # bar plot with breadth of coverage
     coverage_bars({k: v[0] for k, v in final_info[0].items()}, plots_dir)
 
-    # depth of coverage values distribution and line plot
+    # depth of coverage values distribution
     depth_hists({k: v[4] for k, v in final_info[0].items()}, plots_dir)
+
+    # depth of coverage per position
+    depth_lines({k: v[3] for k, v in final_info[0].items()}, plots_dir)
 
 
 def parse_arguments():
@@ -1512,6 +1564,10 @@ def parse_arguments():
                         help='Probes that map against the regions to '
                              'exclude with equal or greater coverage '
                              'may be excluded based on percent identity.')
+
+    parser.add_argument('--t', type=int, required=False,
+                        default=1, dest='threads',
+                        help='')
 
     parser.add_argument('--plot', required=False, action='store_true',
                         dest='plot',
