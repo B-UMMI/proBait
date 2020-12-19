@@ -1225,46 +1225,9 @@ def write_depth(identifier, depth_values, output_dir):
     return depth_file
 
 
-def coverage_bars(coverage_values, output_dir):
+def depth_hists(depth_values):
     """
     """
-
-    short_samples = common_suffixes(list(coverage_values.keys()))
-
-    output_plot = os.path.join(output_dir, 'breadth_of_coverage.html')
-
-    x_values = []
-    y_labels = []
-    for k, v in coverage_values.items():
-        x_values.append(v)
-        y_labels.append(short_samples[k])
-
-    tracer = go.Bar(x=x_values,
-                    y=y_labels,
-                    orientation='h',
-                    marker=dict(color='#c6dbef',
-                                line=dict(color='#252525', width=2)),
-                    width=[0.6]*len(y_labels))
-
-    fig = go.Figure()
-    fig.add_trace(tracer)
-
-    fig.update_layout(title='Breadth of coverage')
-
-    plot(fig, filename=output_plot, auto_open=False)
-
-
-def depth_hists(depth_values, output_dir):
-    """
-    """
-
-    short_samples = common_suffixes(list(depth_values.keys()))
-
-    output_plot = os.path.join(output_dir, 'depth_of_coverage.html')
-
-    nr_rows = math.ceil(len(depth_values) / 3)
-    fig = make_subplots(rows=nr_rows, cols=3,
-                        subplot_titles=list(short_samples.values()))
 
     tracers = []
     for k, v in depth_values.items():
@@ -1276,36 +1239,20 @@ def depth_hists(depth_values, output_dir):
                         showlegend=False)
         tracers.append(tracer)
 
-    r = 1
-    c = 1
-    for t in tracers:
-        fig.add_trace(t, row=r, col=c)
-        c += 1
-        if c > 3:
-            r += 1
-            c = 1
-
-    fig.update_layout(title='Depth of coverage')
-    fig.update_yaxes(type='log')
-    plot(fig, filename=output_plot, auto_open=False)
+    return tracers
 
 
-def depth_lines(depth_values, output_dir):
+depth_values = {k: v[3] for k, v in final_data[0].items()}
+def depth_lines(depth_values, ordered_contigs):
     """
     """
-
-    short_samples = common_suffixes(list(depth_values.keys()))
-
-    output_plot = os.path.join(output_dir, 'depth_per_position.html')
-
-    fig = make_subplots(rows=len(depth_values), cols=1,
-                        subplot_titles=list(short_samples.values()))
 
     tracers = []
     for k, v in depth_values.items():
         x_values = []
         y_values = []
         start = 0
+        contig_order = {e[0] : v[e[0]] for e in ordered_contigs[k]}
         for p, c in v.items():
             values_groups = [list(j) for i, j in groupby(c[0].values())]
             for g in values_groups:
@@ -1323,32 +1270,125 @@ def depth_lines(depth_values, output_dir):
                             line=dict(color='#3690c0', width=1))
         tracers.append(tracer)
 
-    r = 1
-    for t in tracers:
-        fig.add_trace(t, row=r, col=1)
+    return tracers
+
+
+def coverage_table(initial_data, final_data, short_samples):
+    """
+    """
+
+    samples = [short_samples[k] for k in initial_data]
+    initial_cov = [round(v[0], 4) for k, v in initial_data.items()]
+    initial_covered = [v[1] for k, v in initial_data.items()]
+    initial_uncovered = [v[2] for k, v in initial_data.items()]
+    generated_probes = [v[3] for k, v in initial_data.items()]
+    final_cov = [round(v[0], 4) for k, v in final_data.items()]
+    final_covered = [v[1] for k, v in final_data.items()]
+    final_uncovered = [v[2] for k, v in final_data.items()]
+
+    tracer = go.Table(header=dict(values=['Sample', 'Initial<br>coverage',
+                                          'Covered<br>bases', 'Uncovered<br>bases',
+                                          'Generated<br>probes', 'Final<br>coverage',
+                                          'Covered<br>bases', 'Uncovered<br>bases'],
+                                  font=dict(size=10),
+                                  align='left'),
+                      cells=dict(values=[samples, initial_cov, initial_covered,
+                                         initial_uncovered, generated_probes,
+                                         final_cov, final_covered,
+                                         final_uncovered],
+                                 align='left'))
+
+    return tracer
+
+
+initial_data = coverage_info
+final_data = final_info
+output_dir = plots_dir
+short_ids = short_samples
+ordered_contigs = ordered_contigs
+######### ordered contigs and depth info do not have same contigs! Leads to KeyError
+######### check if contigs that are not covered are included in the dictionary!
+def create_report(initial_data, final_data, output_dir, short_ids, ordered_contigs):
+    """
+    """
+
+    table_tracer = coverage_table(initial_data[0], final_data[0], short_ids)
+
+    # depth of coverage values distribution
+    hist_tracers = depth_hists({k: v[4] for k, v in final_data[0].items()})
+
+    # depth of coverage per position
+    line_tracers = depth_lines({k: v[3] for k, v in final_data[0].items()}, ordered_contigs)
+
+    nr_rows = len(line_tracers) + 2
+    titles = ['Summary table']
+    for s in list(short_ids.values()):
+        titles += [s, '']
+
+    specs_def = [[{'type': 'table', 'rowspan': 2, 'colspan': 2}, None],[None, None]]+[[{'type': 'scatter'}, {'type': 'bar'}]]*len(line_tracers)
+
+    fig = make_subplots(rows=nr_rows, cols=2,
+                        subplot_titles=titles,
+                        #vertical_spacing=0.2,
+                        horizontal_spacing=0.03,
+                        column_widths=[0.9, 0.1],
+                        specs=specs_def)
+
+    fig.add_trace(table_tracer, row=1, col=1)
+
+    r = 3
+    c = 1
+    for i, t in enumerate(line_tracers):
+        fig.add_trace(t, row=r, col=c)
+        fig.add_trace(hist_tracers[i], row=r, col=c+1)
+
         r += 1
 
-    fig.update_layout(title='Depth per position', height=200*len(tracers))
-    plot(fig, filename=output_plot, auto_open=False, validate=False)
+    # bars with distribution of depth values have to be in logscale
+    for i in range(2, len(line_tracers) + 1):
+        fig.update_yaxes(type='log', row=i, col=2)
+
+    # line plots need fixed space
+    fig.update_layout(title='Coverage Report', height=200*len(line_tracers)+400,
+                      template='ggplot2')  # plotly_dark
+
+    output_plot = os.path.join(output_dir, 'report.html')
+    plot(fig, filename=output_plot, auto_open=False)
 
 
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-#output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
-#bait_size = 120
-#bait_offset = 120
-#number_refs = 1
-#bait_identity = 1.0
-#bait_coverage = 1.0
-#bait_region = 3
-#cluster_identity = 1.0
-#cluster_coverage = 1.0
-#minlen_contig = bait_size * 2
-#exclude_regions = None
-##exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-#exclude_pident = 0.8
-#exclude_coverage = 0.5
-#cluster_probes = False
-#threads = 4
+def order_contigs(input_files, min_len):
+    """
+    """
+
+    ordered_contigs = {}
+    for g in input_files:
+        basename = os.path.basename(g)
+        contigs = [[rec.id, str(rec.seq), len(str(rec.seq))]
+                   for rec in SeqIO.parse(g, 'fasta')]
+                   #if len(str(rec.seq)) >= min_len]
+        contigs = sorted(contigs, key=lambda x: len(x[1]), reverse=True)
+        ordered_contigs[basename.split('.fasta')[0]] = [[c[0], c[2]] for c in contigs]
+
+    return ordered_contigs
+
+
+input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+bait_size = 120
+bait_offset = 120
+number_refs = 1
+bait_identity = 1.0
+bait_coverage = 1.0
+bait_region = 3
+cluster_identity = 1.0
+cluster_coverage = 1.0
+minlen_contig = bait_size * 2
+exclude_regions = None
+#exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
+exclude_pident = 0.8
+exclude_coverage = 0.5
+cluster_probes = False
+threads = 4
 
 
 # Add features to control depth of coverage of regions.
@@ -1435,18 +1475,17 @@ def main(input_files, output_dir, minlen_contig, number_refs,
     os.mkdir(depth_files_dir)
     depth_files = [write_depth(k, v[3], depth_files_dir) for k, v in final_info[0].items()]
 
+    # get short identifiers
+    short_samples = common_suffixes(list(initial_data[0].keys()))
+
+    # determine contig order from longest to shortest
+    ordered_contigs = order_contigs(genomes, minlen_contig)
+
     # create plots
     plots_dir = os.path.join(output_dir, 'plots')
     os.mkdir(plots_dir)
 
-    # bar plot with breadth of coverage
-    coverage_bars({k: v[0] for k, v in final_info[0].items()}, plots_dir)
-
-    # depth of coverage values distribution
-    depth_hists({k: v[4] for k, v in final_info[0].items()}, plots_dir)
-
-    # depth of coverage per position
-    depth_lines({k: v[3] for k, v in final_info[0].items()}, plots_dir)
+    create_report(coverage_info, final_info, plots_dir, short_samples, ordered_contigs)
 
 
 def parse_arguments():
