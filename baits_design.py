@@ -1229,32 +1229,44 @@ def depth_hists(depth_values):
     """
     """
 
-    tracers = []
+    tracers = {}
     for k, v in depth_values.items():
-        x_values = list(v.keys())
-        y_values = list(v.values())
+        x_values = list(v.values())
+        y_values = list(v.keys())
         tracer = go.Bar(x=x_values,
                         y=y_values,
                         marker=dict(color='#67a9cf'),
-                        showlegend=False)
-        tracers.append(tracer)
+                        showlegend=False,
+                        orientation='h')
+        tracers[k] = tracer
 
     return tracers
 
 
 depth_values = {k: v[3] for k, v in final_data[0].items()}
+# add contig label to each point
 def depth_lines(depth_values, ordered_contigs):
     """
     """
 
-    tracers = []
+    tracers = {}
+    shapes = {}
     for k, v in depth_values.items():
         x_values = []
         y_values = []
         start = 0
-        contig_order = {e[0] : v[e[0]] for e in ordered_contigs[k]}
-        for p, c in v.items():
+        contig_order = {}
+        shapes[k] = []
+        tracers[k] = []
+        for e in ordered_contigs[k]:
+            if e[0] in v:
+                contig_order[e[0]] = v[e[0]]
+            else:
+                contig_order[e[0]] = [{i: 0 for i in range(e[1])}]
+
+        for p, c in contig_order.items():
             values_groups = [list(j) for i, j in groupby(c[0].values())]
+            shape_start = start
             for g in values_groups:
                 start_x = start
                 stop_x = start_x + len(g)
@@ -1263,21 +1275,42 @@ def depth_lines(depth_values, ordered_contigs):
                 x_values.extend([start_x, stop_x])
                 y_values.extend([g[0], g[0]])
 
+            shapes[k].append([shape_start, stop_x])
+
         tracer = go.Scatter(x=x_values,
                             y=y_values,
                             showlegend=False,
                             mode='lines',
-                            line=dict(color='#3690c0', width=1))
-        tracers.append(tracer)
+                            line=dict(color='#3690c0', width=0.5),
+                            fill='tozeroy')
+        tracers[k].append(tracer)
 
-    return tracers
+    return [tracers, shapes]
 
 
-def coverage_table(initial_data, final_data, short_samples):
+def create_table_tracer(header_values, cells_values):
     """
     """
 
-    samples = [short_samples[k] for k in initial_data]
+    tracer = go.Table(header=dict(values=header_values,
+                                  font=dict(size=12),
+                                  align='left'),
+                      cells=dict(values=cells_values,
+                                 align='left'))
+
+    return tracer
+
+
+def coverage_table(initial_data, final_data, short_samples, ref_ids):
+    """
+    """
+
+    samples = [short_samples[k]+' (ref)'
+               if k in ref_ids
+               else short_samples[k]
+               for k in initial_data]
+    nr_contigs = [len(v[3]) for k, v in final_data.items()]
+    total_lengths = [v[1] + v[2] for k, v in initial_data.items()]
     initial_cov = [round(v[0], 4) for k, v in initial_data.items()]
     initial_covered = [v[1] for k, v in initial_data.items()]
     initial_uncovered = [v[2] for k, v in initial_data.items()]
@@ -1286,19 +1319,44 @@ def coverage_table(initial_data, final_data, short_samples):
     final_covered = [v[1] for k, v in final_data.items()]
     final_uncovered = [v[2] for k, v in final_data.items()]
 
-    tracer = go.Table(header=dict(values=['Sample', 'Initial<br>coverage',
-                                          'Covered<br>bases', 'Uncovered<br>bases',
-                                          'Generated<br>probes', 'Final<br>coverage',
-                                          'Covered<br>bases', 'Uncovered<br>bases'],
-                                  font=dict(size=10),
-                                  align='left'),
-                      cells=dict(values=[samples, initial_cov, initial_covered,
-                                         initial_uncovered, generated_probes,
-                                         final_cov, final_covered,
-                                         final_uncovered],
-                                 align='left'))
+    # determine mean depth of coverage
+    mean_depth = []
+    for k, v in final_data.items():
+        length = v[1] + v[2]
+        depth_counts = v[4]
+        depth_sum = sum([d*c for d, c in depth_counts.items()])
+        mean = round(depth_sum / length, 4)
+        mean_depth.append(mean)
 
-    return tracer
+    header_values = ['Sample', 'Number of contigs', 'Total length',
+                     'Initial breadth of coverage', 'Covered bases',
+                     'Uncovered bases', 'Generated probes',
+                     'Final breadth of coverage', 'Covered bases',
+                     'Uncovered bases', 'Mean depth of coverage']
+
+    cells_values = [samples, nr_contigs, total_lengths, initial_cov,
+                    initial_covered, initial_uncovered, generated_probes,
+                    final_cov, final_covered, final_uncovered, mean_depth]
+
+    table_tracer = create_table_tracer(header_values, cells_values)
+
+    return table_tracer
+
+
+def create_shape(xref, yref, xaxis_pos, yaxis_pos,
+                 line_width=1, dash_type='dashdot'):
+    """
+    """
+
+    shape_tracer = dict(type='line',
+                        xref=xref,
+                        yref=yref,
+                        x0=xaxis_pos[0], x1=xaxis_pos[1],
+                        y0=yaxis_pos[0], y1=yaxis_pos[1],
+                        line=dict(width=line_width,
+                                  dash=dash_type))
+
+    return shape_tracer
 
 
 initial_data = coverage_info
@@ -1308,29 +1366,52 @@ short_ids = short_samples
 ordered_contigs = ordered_contigs
 ######### ordered contigs and depth info do not have same contigs! Leads to KeyError
 ######### check if contigs that are not covered are included in the dictionary!
-def create_report(initial_data, final_data, output_dir, short_ids, ordered_contigs):
+######### minimpat2 is mapping against contigs that are too small because we are
+######### providing the full set of contigs, including the contigs that should be removed
+######### for being too small. Create new FASTA files without small contigs?
+
+######### hover text should display position in contig, contig id, and coverage
+######### color contig regions that were not cvered by probes and that were used
+######### to generate new probes in different color
+# initial_data and final_data total length do not match!
+def create_report(initial_data, final_data, output_dir, short_ids, ordered_contigs,
+                  fixed_xaxis, fixed_yaxis, ref_ids):
     """
     """
 
-    table_tracer = coverage_table(initial_data[0], final_data[0], short_ids)
+    # check if user wants equal yaxis ranges for all line plots
+    max_x = None
+    assemblies_lengths = {k: v[1] + v[2] for k, v in final_data[0].items()}
+    if fixed_xaxis is True:
+        max_x = max(assemblies_lengths.values())
+    
+    max_y = None
+    coverage_values = {k: max(list(v[4].keys())) for k, v in final_data[0].items()}
+    if fixed_yaxis is True:
+        max_y = max(coverage_values.values())
+
+    table_tracer = coverage_table(initial_data[0], final_data[0], short_ids, ref_ids)
 
     # depth of coverage values distribution
     hist_tracers = depth_hists({k: v[4] for k, v in final_data[0].items()})
 
     # depth of coverage per position
-    line_tracers = depth_lines({k: v[3] for k, v in final_data[0].items()}, ordered_contigs)
+    line_tracers, shapes = depth_lines({k: v[3]
+                                        for k, v in final_data[0].items()},
+                                       ordered_contigs)
 
     nr_rows = len(line_tracers) + 2
     titles = ['Summary table']
     for s in list(short_ids.values()):
         titles += [s, '']
 
-    specs_def = [[{'type': 'table', 'rowspan': 2, 'colspan': 2}, None],[None, None]]+[[{'type': 'scatter'}, {'type': 'bar'}]]*len(line_tracers)
+    specs_def = [[{'type': 'table', 'rowspan': 2, 'colspan': 2}, None],
+                 [None, None]]+[[{'type': 'scatter'}, {'type': 'bar'}]]*len(line_tracers)
 
     fig = make_subplots(rows=nr_rows, cols=2,
                         subplot_titles=titles,
-                        #vertical_spacing=0.2,
-                        horizontal_spacing=0.03,
+                        horizontal_spacing=0.002,
+                        shared_yaxes=True,
                         column_widths=[0.9, 0.1],
                         specs=specs_def)
 
@@ -1338,25 +1419,68 @@ def create_report(initial_data, final_data, output_dir, short_ids, ordered_conti
 
     r = 3
     c = 1
-    for i, t in enumerate(line_tracers):
-        fig.add_trace(t, row=r, col=c)
-        fig.add_trace(hist_tracers[i], row=r, col=c+1)
+    for k, v in line_tracers.items():
+        fig.add_trace(v[0], row=r, col=c)
+        fig.update_yaxes(title_text='Coverage', row=r, col=c)
+        fig.update_xaxes(title_text='Position', row=r, col=c)
+
+        fig.add_trace(hist_tracers[k], row=r, col=c+1)
+        fig.update_yaxes(showticklabels=False, ticks='', row=r, col=c+1)
+        fig.update_xaxes(showticklabels=False, ticks='', row=r, col=c+1)
+
+        top_x = assemblies_lengths[k] if max_x is None else max_x
+        top_y = coverage_values[k] if max_y is None else max_y
+
+        # adjust axis range
+        fig.update_xaxes(range=[-0.2, top_x], row=r, col=c)
+        fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=r, col=c)
+        fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=r, col=c+1)
 
         r += 1
 
-    # bars with distribution of depth values have to be in logscale
+    # create shapes for contig boundaries
+    ref_axis = 1
+    shapes_tracers = []
+    for k, v in shapes.items():
+        current_shapes = list(shapes[k])
+        y_value = coverage_values[k] if max_y is None else max_y
+        for s in current_shapes:
+            axis_str = '' if ref_axis == 1 else ref_axis
+            xref = 'x{0}'.format(axis_str)
+            yref = 'y{0}'.format(axis_str)
+            # do not create line for last contig
+            if s != current_shapes[-1]:
+                # only create tracer for end position
+                # start position is equal to end position of previous contig
+                shape_tracer = create_shape(xref, yref, [s[1], s[1]], [0, y_value])
+                shapes_tracers.append(shape_tracer)
+
+        ref_axis += 2
+
+    fig.update_layout(shapes=shapes_tracers)
+
+    # disable grid
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=False)
+
+    # change titles position
+    for annotation in fig.layout.annotations:
+        annotation.update(x=0.03)
+
+    # bars with distribution of depth values should be in logscale
     for i in range(2, len(line_tracers) + 1):
-        fig.update_yaxes(type='log', row=i, col=2)
+        fig.update_xaxes(type='log', row=i, col=2)
 
     # line plots need fixed space
-    fig.update_layout(title='Coverage Report', height=200*len(line_tracers)+400,
+    fig.update_layout(title='Coverage Report',
+                      height=200*len(line_tracers)+400,
                       template='ggplot2')  # plotly_dark
 
     output_plot = os.path.join(output_dir, 'report.html')
     plot(fig, filename=output_plot, auto_open=False)
 
 
-def order_contigs(input_files, min_len):
+def order_contigs(input_files):
     """
     """
 
@@ -1365,7 +1489,6 @@ def order_contigs(input_files, min_len):
         basename = os.path.basename(g)
         contigs = [[rec.id, str(rec.seq), len(str(rec.seq))]
                    for rec in SeqIO.parse(g, 'fasta')]
-                   #if len(str(rec.seq)) >= min_len]
         contigs = sorted(contigs, key=lambda x: len(x[1]), reverse=True)
         ordered_contigs[basename.split('.fasta')[0]] = [[c[0], c[2]] for c in contigs]
 
@@ -1396,16 +1519,19 @@ threads = 4
 # cluster and remove highly similar baits to decrease coverage of
 # similar regions with high variability.
 
-# order contigs before determining line plot with positions intervals depth of coverage
 # determine length of subsequences with 0 coverage and etc
-# add distribution of depth values as subplot next to the depth per position!
 
+# add option to avoid generating baits close to contigs boundaries
+# add option to determine baits from target regions and then only generate baits
+# to capture diversity in those regions in other genomes (this allows to determine baits
+# only for targeted regions and will not generate baits for other uncovered loci)
 
-def main(input_files, output_dir, minlen_contig, number_refs,
-         bait_size, bait_offset, bait_identity, bait_coverage,
+# initial_data and final_data total length do not match!
+def main(input_files, output_dir, minlen_contig, contig_boundaries,
+         number_refs, bait_size, bait_offset, bait_identity, bait_coverage,
          bait_region, cluster_probes, cluster_identity, cluster_coverage,
          exclude_regions, exclude_pident, exclude_coverage, threads,
-         plot):
+         plot, fixed_xaxis, fixed_yaxis):
 
     if os.path.isdir(output_dir) is False:
         os.mkdir(output_dir)
@@ -1476,16 +1602,18 @@ def main(input_files, output_dir, minlen_contig, number_refs,
     depth_files = [write_depth(k, v[3], depth_files_dir) for k, v in final_info[0].items()]
 
     # get short identifiers
-    short_samples = common_suffixes(list(initial_data[0].keys()))
+    short_samples = common_suffixes(list(coverage_info[0].keys()))
 
     # determine contig order from longest to shortest
-    ordered_contigs = order_contigs(genomes, minlen_contig)
+    ordered_contigs = order_contigs(genomes)
 
     # create plots
     plots_dir = os.path.join(output_dir, 'plots')
     os.mkdir(plots_dir)
 
-    create_report(coverage_info, final_info, plots_dir, short_samples, ordered_contigs)
+    ref_ids = [os.path.basename(f).split('.fasta')[0] for f in ref_set]
+    create_report(coverage_info, final_info, plots_dir, short_samples,
+                  ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids)
 
 
 def parse_arguments():
@@ -1511,6 +1639,14 @@ def parse_arguments():
                              'not be created for contigs with a '
                              'length value that is smaller than '
                              'this value.')
+
+    parser.add_argument('--cb', type=int, required=False,
+                        default=0,
+                        dest='contig_boundaries',
+                        help='Distance to contig boundaries. '
+                             'Baits will be determined for uncovered '
+                             'regions that are at least this value of '
+                             'bases from one of the contig boundaries.')
 
     parser.add_argument('--nr', type=int, required=False,
                         default=1,
@@ -1610,6 +1746,14 @@ def parse_arguments():
 
     parser.add_argument('--plot', required=False, action='store_true',
                         dest='plot',
+                        help='')
+
+    parser.add_argument('--fx', required=False, action='store_true',
+                        dest='fixed_xaxis',
+                        help='')
+
+    parser.add_argument('--fy', required=False, action='store_true',
+                        dest='fixed_yaxis',
                         help='')
 
     args = parser.parse_args()
