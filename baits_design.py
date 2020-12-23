@@ -21,7 +21,6 @@ import subprocess
 from copy import deepcopy
 from itertools import groupby
 from collections import Counter
-from operator import itemgetter
 
 from Bio import SeqIO
 import plotly.graph_objs as go
@@ -691,11 +690,12 @@ def count_contigs(fasta, min_len):
             (longer than specified minimum length).
     """
 
-    contigs = [rec for rec in SeqIO.parse(fasta, 'fasta')
-               if len(str(rec.seq)) >= min_len]
+    contigs = [str(rec.seq) for rec in SeqIO.parse(fasta, 'fasta')]
     nr_contigs = len(contigs)
+    valid_contigs = len([seq for seq in contigs if len(seq) >= min_len])
+    total_length = sum([len(seq) for seq in contigs])
 
-    return nr_contigs
+    return [nr_contigs, valid_contigs, total_length]
 
 
 def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
@@ -731,7 +731,7 @@ def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
     baits = flatten_list(baits)
 
     write_lines(baits, output_file)
-    
+
     return len(baits)
 
 
@@ -807,16 +807,23 @@ def determine_missing_intervals(intervals, identifier, total_len):
                 Total number of bases not covered by probes.
     """
 
-    start = 0
     not_covered = 0
-    missing_regions = {}
-    for i in intervals:
-        missing_regions.setdefault(identifier, []).append([start, i[0]])
+    missing_regions = {identifier: []}
+    if intervals[0][0] != 0:
+        missing_regions[identifier].append([0, intervals[0][0]])
+        not_covered += intervals[0][0]
+
+    start = intervals[0][1]
+
+    for i in intervals[1:]:
+        missing_regions[identifier].append([start, i[0]])
         not_covered += i[0] - start
         start = i[1]
+
     # add terminal region
-    missing_regions[identifier].append([start, total_len])
-    not_covered += total_len - start
+    if start != total_len:
+        missing_regions[identifier].append([start, total_len])
+        not_covered += total_len - start
 
     return [missing_regions, not_covered]
 
@@ -854,6 +861,10 @@ def cover_intervals(intervals, total_len, bait_size, bait_region):
                                                      i[0], i[1],
                                                      total_len)
                 cover_baits.append(bait_interval)
+            # will slide and determine baits
+            # if in the last iter, uncovered region is very small it will overlap
+            # with regions that are already covered and increase depth of coverage
+            # pass bait_region as arg to stop determining when region is too small?
             elif span >= bait_size:
                 probes = determine_interval_baits(bait_size, i[0], i[1])
                 cover_baits.extend(probes)
@@ -992,12 +1003,10 @@ def common_suffixes(strings):
 
 def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
                                bait_coverage, bait_identity, bait_region,
-                               generate=False, depth=False):
+                               nr_contigs, short_samples, generate=False,
+                               depth=False):
     """
     """
-
-    # determine common suffixes to shorten length of samples name
-    short_samples = common_suffixes(genomes)
 
     if generate is True:
         header = ('{0:<30}  {1:^10}  {2:^10}  {3:^10}  '
@@ -1017,7 +1026,7 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
         paf_path = os.path.join(output_dir, gbasename+'.paf')
 
         contigs = import_sequences(g)
-        total_bases = sum([len(v) for k, v in contigs.items()])
+        total_bases = nr_contigs[g][2]
 
         minimap_std = run_minimap2(g, unique_baits, paf_path)
 
@@ -1064,10 +1073,16 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
                             for k, v in covered_intervals_sorted.items()}
 
         coverage = determine_breadth_coverage(merged_intervals, total_bases)
-
+        
         # determine subsequences that are not covered
         missing = [determine_missing_intervals(v, k, len(contigs[k]))
                    for k, v in merged_intervals.items()]
+
+        # add missing regions for contigs that had 0 baits mapped
+        not_mapped = [[{c: [[0, len(contigs[c])]]}, len(contigs[c])] for c in contigs if c not in merged_intervals]
+        missing.extend(not_mapped)
+        
+        print(len(contigs), len(missing))
 
         missing_regions = {k: v for i in missing for k, v in i[0].items()}
         not_covered = sum([i[1] for i in missing])
@@ -1099,7 +1114,7 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
         if depth is True:
             # determine depth of coverage
             depth_values = {}
-            for k, v in covered_intervals_sorted.items():
+            for k, v in merged_intervals.items():
                 depth_values[k] = determine_depth_coverage(v, len(contigs[k]))
 
             total_counts = {}
@@ -1235,6 +1250,8 @@ def depth_hists(depth_values):
         y_values = list(v.keys())
         tracer = go.Bar(x=x_values,
                         y=y_values,
+                        hovertemplate=('<b>Coverage:<b> %{y}'
+                                      '<br><b>Number of pos.:<b> %{x}'),
                         marker=dict(color='#67a9cf'),
                         showlegend=False,
                         orientation='h')
@@ -1243,8 +1260,7 @@ def depth_hists(depth_values):
     return tracers
 
 
-depth_values = {k: v[3] for k, v in final_data[0].items()}
-# add contig label to each point
+#depth_values = {k: v[3] for k, v in final_data[0].items()}
 def depth_lines(depth_values, ordered_contigs):
     """
     """
@@ -1254,7 +1270,9 @@ def depth_lines(depth_values, ordered_contigs):
     for k, v in depth_values.items():
         x_values = []
         y_values = []
-        start = 0
+        hovertext = []
+        # start genome at xaxis=1 in plot
+        cumulative_pos = 1
         contig_order = {}
         shapes[k] = []
         tracers[k] = []
@@ -1265,12 +1283,18 @@ def depth_lines(depth_values, ordered_contigs):
                 contig_order[e[0]] = [{i: 0 for i in range(e[1])}]
 
         for p, c in contig_order.items():
+            contig_pos = 1
             values_groups = [list(j) for i, j in groupby(c[0].values())]
-            shape_start = start
+            shape_start = cumulative_pos
             for g in values_groups:
-                start_x = start
-                stop_x = start_x + len(g)
-                start += len(g)
+                hovertext.append(contig_pos)
+                hovertext.append(contig_pos + (len(g) - 1))
+
+                start_x = cumulative_pos
+                stop_x = start_x + (len(g) - 1)
+
+                cumulative_pos += len(g)
+                contig_pos += len(g)
 
                 x_values.extend([start_x, stop_x])
                 y_values.extend([g[0], g[0]])
@@ -1279,6 +1303,10 @@ def depth_lines(depth_values, ordered_contigs):
 
         tracer = go.Scatter(x=x_values,
                             y=y_values,
+                            text=hovertext,
+                            hovertemplate=('<b>Contig pos.:<b> %{text}'
+                                           '<br><b>Cumulative pos.:<b> %{x}'
+                                           '<br><b>Coverage:<b> %{y}'),
                             showlegend=False,
                             mode='lines',
                             line=dict(color='#3690c0', width=0.5),
@@ -1301,31 +1329,41 @@ def create_table_tracer(header_values, cells_values):
     return tracer
 
 
-def coverage_table(initial_data, final_data, short_samples, ref_ids):
+#initial2_data = initial_data[0]
+#final2_data = final_data[0]
+#short_samples = short_ids
+def coverage_table(initial2_data, final2_data, short_samples, ref_ids,
+                   assemblies_lengths):
     """
     """
 
-    samples = [short_samples[k]+' (ref)'
+    ids = {os.path.basename(k): v + [short_samples[k+'.fasta']]
+           for k, v in assemblies_lengths.items()}
+
+    samples = [v[3]+' (ref)'
                if k in ref_ids
-               else short_samples[k]
-               for k in initial_data]
-    nr_contigs = [len(v[3]) for k, v in final_data.items()]
-    total_lengths = [v[1] + v[2] for k, v in initial_data.items()]
-    initial_cov = [round(v[0], 4) for k, v in initial_data.items()]
-    initial_covered = [v[1] for k, v in initial_data.items()]
-    initial_uncovered = [v[2] for k, v in initial_data.items()]
-    generated_probes = [v[3] for k, v in initial_data.items()]
-    final_cov = [round(v[0], 4) for k, v in final_data.items()]
-    final_covered = [v[1] for k, v in final_data.items()]
-    final_uncovered = [v[2] for k, v in final_data.items()]
+               else v[3]
+               for k, v in ids.items()]
+    nr_contigs = [v[0] for k, v in ids.items()]
+    total_lengths = [v[2] for k, v in ids.items()]
+
+    initial_cov = [round(initial2_data[k][0], 4) for k in ids]
+    initial_covered = [initial2_data[k][1] for k in ids]
+    initial_uncovered = [initial2_data[k][2] for k in ids]
+
+    generated_probes = [initial2_data[k][3] for k in ids]
+
+    final_cov = [round(final2_data[k][0], 4) for k in ids]
+    final_covered = [final2_data[k][1] for k in ids]
+    final_uncovered = [final2_data[k][2] for k in ids]
 
     # determine mean depth of coverage
     mean_depth = []
-    for k, v in final_data.items():
-        length = v[1] + v[2]
-        depth_counts = v[4]
+    for k in ids:
+        length = ids[k][2]
+        depth_counts = final2_data[k][4]
         depth_sum = sum([d*c for d, c in depth_counts.items()])
-        mean = round(depth_sum / length, 4)
+        mean = round(depth_sum/length, 4)
         mean_depth.append(mean)
 
     header_values = ['Sample', 'Number of contigs', 'Total length',
@@ -1359,38 +1397,32 @@ def create_shape(xref, yref, xaxis_pos, yaxis_pos,
     return shape_tracer
 
 
-initial_data = coverage_info
-final_data = final_info
-output_dir = plots_dir
-short_ids = short_samples
-ordered_contigs = ordered_contigs
-######### ordered contigs and depth info do not have same contigs! Leads to KeyError
-######### check if contigs that are not covered are included in the dictionary!
-######### minimpat2 is mapping against contigs that are too small because we are
-######### providing the full set of contigs, including the contigs that should be removed
-######### for being too small. Create new FASTA files without small contigs?
-
-######### hover text should display position in contig, contig id, and coverage
-######### color contig regions that were not cvered by probes and that were used
-######### to generate new probes in different color
-# initial_data and final_data total length do not match!
+#initial_data = coverage_info
+#final_data = final_info
+#output_dir = plots_dir
+#short_ids = short_samples
+#fixed_xaxis = True
+#fixed_yaxis = True
+######### color contig regions that were not covered by probes and that were used
+######### to generate new probes in different color (add arrows to start and stop)
 def create_report(initial_data, final_data, output_dir, short_ids, ordered_contigs,
-                  fixed_xaxis, fixed_yaxis, ref_ids):
+                  fixed_xaxis, fixed_yaxis, ref_ids, nr_contigs):
     """
     """
 
     # check if user wants equal yaxis ranges for all line plots
     max_x = None
-    assemblies_lengths = {k: v[1] + v[2] for k, v in final_data[0].items()}
+    assemblies_lengths = {k.split('.fasta')[0]: v for k, v in nr_contigs.items()}
     if fixed_xaxis is True:
-        max_x = max(assemblies_lengths.values())
+        max_x = max([v[2] for v in assemblies_lengths.values()])
     
     max_y = None
     coverage_values = {k: max(list(v[4].keys())) for k, v in final_data[0].items()}
     if fixed_yaxis is True:
         max_y = max(coverage_values.values())
 
-    table_tracer = coverage_table(initial_data[0], final_data[0], short_ids, ref_ids)
+    table_tracer = coverage_table(initial_data[0], final_data[0], short_ids, ref_ids,
+                                  assemblies_lengths)
 
     # depth of coverage values distribution
     hist_tracers = depth_hists({k: v[4] for k, v in final_data[0].items()})
@@ -1502,22 +1534,20 @@ bait_offset = 120
 number_refs = 1
 bait_identity = 1.0
 bait_coverage = 1.0
-bait_region = 3
+bait_region = 0
 cluster_identity = 1.0
 cluster_coverage = 1.0
-minlen_contig = bait_size * 2
+minlen_contig = bait_size
 exclude_regions = None
 #exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
 exclude_pident = 0.8
 exclude_coverage = 0.5
-cluster_probes = False
+cluster_probes = True
 threads = 4
 
 
 # Add features to control depth of coverage of regions.
 # e.g.: duplicate coverage of regions only covered once.
-# cluster and remove highly similar baits to decrease coverage of
-# similar regions with high variability.
 
 # determine length of subsequences with 0 coverage and etc
 
@@ -1525,8 +1555,6 @@ threads = 4
 # add option to determine baits from target regions and then only generate baits
 # to capture diversity in those regions in other genomes (this allows to determine baits
 # only for targeted regions and will not generate baits for other uncovered loci)
-
-# initial_data and final_data total length do not match!
 def main(input_files, output_dir, minlen_contig, contig_boundaries,
          number_refs, bait_size, bait_offset, bait_identity, bait_coverage,
          bait_region, cluster_probes, cluster_identity, cluster_coverage,
@@ -1542,13 +1570,15 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
     genomes = [os.path.join(input_files, file)
                for file in os.listdir(input_files)]
 
-    nr_contigs = [[f, count_contigs(f, minlen_contig)] for f in genomes]
+    # get short identifiers
+    short_samples = common_suffixes(genomes)
+
+    # determine number of contigs and total length
+    nr_contigs = {f: count_contigs(f, minlen_contig) for f in genomes}
 
     # select assemblies with lowest number of contigs
-    nr_contigs = sorted(nr_contigs, key=lambda x: x[1])
-    ref_set = [t[0] for t in nr_contigs[0:number_refs]]
-    map_set = list(set(genomes) - set(ref_set))
-    map_set.sort()
+    sorted_contigs = sorted(list(nr_contigs.items()), key=lambda x: x[1][1])
+    ref_set = [t[0] for t in sorted_contigs[0:number_refs]]
 
     # shred genomic sequences
     # not generating kmers that cover the end of the sequences!
@@ -1570,8 +1600,9 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
     coverage_info = incremental_bait_generator(genomes, unique_baits,
                                                output_dir, bait_size,
                                                bait_coverage, bait_identity,
-                                               bait_region, generate=True,
-                                               depth=False)
+                                               bait_region, nr_contigs,
+                                               short_samples,
+                                               generate=True, depth=False)
 
     print('Added {0} probes to cover {1} assemblies.\nTotal '
           'of {2} probes.'.format(coverage_info[1], len(genomes), nr_baits+coverage_info[1]))
@@ -1594,15 +1625,13 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
     final_info = incremental_bait_generator(genomes, unique_baits, output_dir,
                                             bait_size, bait_coverage,
                                             bait_identity, bait_region,
+                                            nr_contigs, short_samples,
                                             generate=False, depth=True)
 
     # save depth values
     depth_files_dir = os.path.join(output_dir, 'depth_files')
     os.mkdir(depth_files_dir)
     depth_files = [write_depth(k, v[3], depth_files_dir) for k, v in final_info[0].items()]
-
-    # get short identifiers
-    short_samples = common_suffixes(list(coverage_info[0].keys()))
 
     # determine contig order from longest to shortest
     ordered_contigs = order_contigs(genomes)
@@ -1613,7 +1642,8 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
 
     ref_ids = [os.path.basename(f).split('.fasta')[0] for f in ref_set]
     create_report(coverage_info, final_info, plots_dir, short_samples,
-                  ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids)
+                  ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
+                  nr_contigs)
 
 
 def parse_arguments():
