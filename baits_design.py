@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Wed Nov 11 22:26:18 2020
 
-@author: rfm
 """
 
 
@@ -778,6 +776,9 @@ def merge_intervals(intervals):
     return merged
 
 
+#intervals = v
+#identifier = k
+#total_len = len(contigs[k])
 def determine_missing_intervals(intervals, identifier, total_len):
     """ Determines sequence intervals that are not covered by any
         probes.
@@ -807,18 +808,25 @@ def determine_missing_intervals(intervals, identifier, total_len):
                 Total number of bases not covered by probes.
     """
 
+    start = 0
     not_covered = 0
     missing_regions = {identifier: []}
-    if intervals[0][0] != 0:
-        missing_regions[identifier].append([0, intervals[0][0]])
-        not_covered += intervals[0][0]
+    for i in intervals:
+        diff = i[0] - start
+        if diff > 0:
+            missing_regions[identifier].append([start, start+diff])
+            not_covered += diff
+            start += diff
 
-    start = intervals[0][1]
-
-    for i in intervals[1:]:
-        missing_regions[identifier].append([start, i[0]])
-        not_covered += i[0] - start
-        start = i[1]
+        # create groups of equal values
+        values_groups = [list(j) for i, j in groupby(i[2].values())]
+        for g in values_groups:
+            if g[0] == 0:
+                missing_regions[identifier].append([start, start+len(g)])
+                not_covered += len(g)
+                start += len(g)
+            else:
+                start += len(g)
 
     # add terminal region
     if start != total_len:
@@ -937,8 +945,6 @@ def regex_matcher(string, pattern):
     return matches
 
 
-# coverage_info = [':6', '-ata', ':10', '+gtc', ':4', '*at', ':3']
-# start = 1
 def single_position_coverage(coverage_info, start):
     """ Determine if positions in a subsequence are
         covered based on information in the cs field
@@ -1073,7 +1079,7 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
                             for k, v in covered_intervals_sorted.items()}
 
         coverage = determine_breadth_coverage(merged_intervals, total_bases)
-        
+
         # determine subsequences that are not covered
         missing = [determine_missing_intervals(v, k, len(contigs[k]))
                    for k, v in merged_intervals.items()]
@@ -1081,8 +1087,6 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
         # add missing regions for contigs that had 0 baits mapped
         not_mapped = [[{c: [[0, len(contigs[c])]]}, len(contigs[c])] for c in contigs if c not in merged_intervals]
         missing.extend(not_mapped)
-        
-        print(len(contigs), len(missing))
 
         missing_regions = {k: v for i in missing for k, v in i[0].items()}
         not_covered = sum([i[1] for i in missing])
@@ -1136,28 +1140,31 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
     return [coverage_info, total]
 
 
-def exclude_similar_probes(unique_baits, output_dir, cluster_identity, threads):
+def exclude_similar_probes(unique_baits, clustering_dir, cluster_identity,
+                           cluster_coverage, bait_size, threads):
     """
     """
 
     print('Clustering probes...')
     # cluster baits and remove based on similarity threshold
     # create database
-    mmseqs_db = os.path.join(output_dir, 'mmseqs_db')
+    mmseqs_db = os.path.join(clustering_dir, 'mmseqs_db')
     mmseqs_std = create_mmseqs_db(unique_baits, mmseqs_db)
 
     # output paths
-    cluster_db = os.path.join(output_dir, 'clusters')
-    temp_directory = os.path.join(output_dir, 'tmp')
-    align_db = os.path.join(output_dir, 'alignDB')
-    align_out = os.path.join(output_dir, 'alignOUT')
+    cluster_db = os.path.join(clustering_dir, 'clusters')
+    temp_directory = os.path.join(clustering_dir, 'tmp')
+    align_db = os.path.join(clustering_dir, 'alignDB')
+    align_out = os.path.join(clustering_dir, 'alignOUT')
 
     os.mkdir(temp_directory)
     # clustering
     cluster_std = cluster_baits(mmseqs_db, cluster_db,
                                 temp_directory, threads)
+
     # align clusters
     align_std = align_clusters(mmseqs_db, cluster_db, align_db, threads)
+
     # convert alignments
     convert_std = convert_alignmentDB(mmseqs_db, align_db, align_out)
 
@@ -1166,7 +1173,7 @@ def exclude_similar_probes(unique_baits, output_dir, cluster_identity, threads):
     clusters = {}
     # pident at index 2
     for l in cluster_lines:
-        clusters.setdefault(l[0], []).append([l[1], l[2]])
+        clusters.setdefault(l[0], []).append([l[1], l[2], l[3]])
 
     # exclude clusters with only the representative
     clusters = {k: v for k, v in clusters.items() if len(v) > 1}
@@ -1176,7 +1183,9 @@ def exclude_similar_probes(unique_baits, output_dir, cluster_identity, threads):
                 for k, v in clusters.items()}
 
     # get identifiers of baits with identity above threshold
-    exclude = [[e for e in v if float(e[1]) >= cluster_identity]
+    exclude = [[e for e in v
+                if float(e[1]) >= cluster_identity
+                and float(e[2]) >= (bait_size*cluster_coverage)]
                for k, v in clusters.items()]
     exclude = flatten_list(exclude)
     excluded_seqids = [e[0] for e in exclude]
@@ -1188,10 +1197,10 @@ def exclude_similar_probes(unique_baits, output_dir, cluster_identity, threads):
     baits = {k: v for k, v in baits.items() if k not in excluded_seqids}
 
     baits_records = ['>{0}\n{1}'.format(k, v) for k, v in baits.items()]
-    filtered_baits = os.path.join(output_dir, 'filtered_baits')
+    filtered_baits = os.path.join(clustering_dir, 'filtered_baits')
     write_lines(baits_records, filtered_baits)
 
-    return filtered_baits
+    return [filtered_baits, excluded_seqids]
 
 
 def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
@@ -1222,7 +1231,7 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
     final_baits = os.path.join(output_dir, 'final_baits.fasta')
     write_lines(baits_records, final_baits)
 
-    return final_baits
+    return [final_baits, multispecific_probes]
 
 
 def write_depth(identifier, depth_values, output_dir):
@@ -1260,7 +1269,6 @@ def depth_hists(depth_values):
     return tracers
 
 
-#depth_values = {k: v[3] for k, v in final_data[0].items()}
 def depth_lines(depth_values, ordered_contigs):
     """
     """
@@ -1329,9 +1337,6 @@ def create_table_tracer(header_values, cells_values):
     return tracer
 
 
-#initial2_data = initial_data[0]
-#final2_data = final_data[0]
-#short_samples = short_ids
 def coverage_table(initial2_data, final2_data, short_samples, ref_ids,
                    assemblies_lengths):
     """
@@ -1397,16 +1402,11 @@ def create_shape(xref, yref, xaxis_pos, yaxis_pos,
     return shape_tracer
 
 
-#initial_data = coverage_info
-#final_data = final_info
-#output_dir = plots_dir
-#short_ids = short_samples
-#fixed_xaxis = True
-#fixed_yaxis = True
-######### color contig regions that were not covered by probes and that were used
-######### to generate new probes in different color (add arrows to start and stop)
-def create_report(initial_data, final_data, output_dir, short_ids, ordered_contigs,
-                  fixed_xaxis, fixed_yaxis, ref_ids, nr_contigs):
+# color contig regions that were not covered by probes and that were used
+# to generate new probes in different color (add arrows to start and stop)
+def create_report(initial_data, final_data, output_dir, short_ids,
+                  ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
+                  nr_contigs):
     """
     """
 
@@ -1415,7 +1415,7 @@ def create_report(initial_data, final_data, output_dir, short_ids, ordered_conti
     assemblies_lengths = {k.split('.fasta')[0]: v for k, v in nr_contigs.items()}
     if fixed_xaxis is True:
         max_x = max([v[2] for v in assemblies_lengths.values()])
-    
+
     max_y = None
     coverage_values = {k: max(list(v[4].keys())) for k, v in final_data[0].items()}
     if fixed_yaxis is True:
@@ -1506,7 +1506,7 @@ def create_report(initial_data, final_data, output_dir, short_ids, ordered_conti
     # line plots need fixed space
     fig.update_layout(title='Coverage Report',
                       height=200*len(line_tracers)+400,
-                      template='ggplot2')  # plotly_dark
+                      template='ggplot2')  # plotly_dark, ggplot2
 
     output_plot = os.path.join(output_dir, 'report.html')
     plot(fig, filename=output_plot, auto_open=False)
@@ -1527,34 +1527,43 @@ def order_contigs(input_files):
     return ordered_contigs
 
 
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
-bait_size = 120
-bait_offset = 120
-number_refs = 1
-bait_identity = 1.0
-bait_coverage = 1.0
-bait_region = 0
-cluster_identity = 1.0
-cluster_coverage = 1.0
-minlen_contig = bait_size
-exclude_regions = None
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+#output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+#bait_size = 120
+#bait_offset = 120
+#number_refs = 1
+#bait_identity = 0.95
+#bait_coverage = 1.0
+#bait_region = 10
+#cluster_probes = False
+#cluster_identity = 0.8
+#cluster_coverage = 0.9
+#minlen_contig = 120
+##exclude_regions = None
 #exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-exclude_pident = 0.8
-exclude_coverage = 0.5
-cluster_probes = True
-threads = 4
+#exclude_pident = 0.7
+#exclude_coverage = 0.7
+#threads = 4
+#fixed_xaxis = True
+#fixed_yaxis = True
 
 
 # Add features to control depth of coverage of regions.
 # e.g.: duplicate coverage of regions only covered once.
 
 # determine length of subsequences with 0 coverage and etc
+# number of SNPs, deletions, insertions and etc
 
 # add option to avoid generating baits close to contigs boundaries
+
 # add option to determine baits from target regions and then only generate baits
 # to capture diversity in those regions in other genomes (this allows to determine baits
 # only for targeted regions and will not generate baits for other uncovered loci)
+# users can provide annotation labels for the target regions that are included in
+# the hovertext
+# important to search for options to control mmseqs2 and minimap2 memory usage
+# the process might fail because those tools use too much memory
+# for the step that maps against the human genome, give 1 chromossome at a time
 def main(input_files, output_dir, minlen_contig, contig_boundaries,
          number_refs, bait_size, bait_offset, bait_identity, bait_coverage,
          bait_region, cluster_probes, cluster_identity, cluster_coverage,
@@ -1611,7 +1620,8 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
         clustering_dir = os.path.join(output_dir, 'clustering')
         os.mkdir(clustering_dir)
         unique_baits, removed = exclude_similar_probes(unique_baits, clustering_dir,
-                                                       cluster_identity, threads)
+                                                       cluster_identity, cluster_coverage,
+                                                       bait_size, threads)
 
     if exclude_regions is not None:
         exclude_dir = os.path.join(output_dir, 'exclude')
@@ -1644,6 +1654,8 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
     create_report(coverage_info, final_info, plots_dir, short_samples,
                   ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
                   nr_contigs)
+
+    print('Coverage report available in {0}'.format(plots_dir))
 
 
 def parse_arguments():
