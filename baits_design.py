@@ -1308,23 +1308,23 @@ def depth_lines(depth_values, ordered_contigs):
                 y_values.extend([g[0], g[0]])
 
             shapes[k].append([shape_start, stop_x])
-
-        tracer = go.Scatter(x=x_values,
-                            y=y_values,
-                            text=hovertext,
-                            hovertemplate=('<b>Contig pos.:<b> %{text}'
-                                           '<br><b>Cumulative pos.:<b> %{x}'
-                                           '<br><b>Coverage:<b> %{y}'),
-                            showlegend=False,
-                            mode='lines',
-                            line=dict(color='#3690c0', width=0.5),
-                            fill='tozeroy')
+        # use Scattergl to deal with large datasets
+        tracer = go.Scattergl(x=x_values,
+                              y=y_values,
+                              text=hovertext,
+                              hovertemplate=('<b>Contig pos.:<b> %{text}'
+                                             '<br><b>Cumulative pos.:<b> %{x}'
+                                             '<br><b>Coverage:<b> %{y}'),
+                              showlegend=False,
+                              mode='lines',
+                              line=dict(color='#3690c0', width=0.5),
+                              fill='tozeroy')
         tracers[k].append(tracer)
 
     return [tracers, shapes]
 
 
-def create_table_tracer(header_values, cells_values):
+def create_table_tracer(header_values, cells_values, domain):
     """
     """
 
@@ -1332,7 +1332,8 @@ def create_table_tracer(header_values, cells_values):
                                   font=dict(size=12),
                                   align='left'),
                       cells=dict(values=cells_values,
-                                 align='left'))
+                                 align='left'),
+                      domain=domain)
 
     return tracer
 
@@ -1381,7 +1382,7 @@ def coverage_table(initial2_data, final2_data, short_samples, ref_ids,
                     initial_covered, initial_uncovered, generated_probes,
                     final_cov, final_covered, final_uncovered, mean_depth]
 
-    table_tracer = create_table_tracer(header_values, cells_values)
+    table_tracer = create_table_tracer(header_values, cells_values, dict(x=[0, 1]))
 
     return table_tracer
 
@@ -1406,7 +1407,7 @@ def create_shape(xref, yref, xaxis_pos, yaxis_pos,
 # to generate new probes in different color (add arrows to start and stop)
 def create_report(initial_data, final_data, output_dir, short_ids,
                   ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
-                  nr_contigs):
+                  nr_contigs, configs):
     """
     """
 
@@ -1432,33 +1433,70 @@ def create_report(initial_data, final_data, output_dir, short_ids,
                                         for k, v in final_data[0].items()},
                                        ordered_contigs)
 
-    nr_rows = len(line_tracers) + 2
-    titles = ['Summary table']
+    nr_rows = len(line_tracers) + 4
+    titles = ['Configs', 'Scatter', 'Coverage statistics']
     for s in list(short_ids.values()):
         titles += [s, '']
 
-    specs_def = [[{'type': 'table', 'rowspan': 2, 'colspan': 2}, None],
+    specs_def = [[{'type': 'table', 'rowspan': 2, 'colspan': 1}, {'type': 'scatter', 'rowspan': 2, 'colspan': 1}],
+                 [None, None],
+                 [{'type': 'table', 'rowspan': 2, 'colspan': 2}, None],
                  [None, None]]+[[{'type': 'scatter'}, {'type': 'bar'}]]*len(line_tracers)
 
     fig = make_subplots(rows=nr_rows, cols=2,
                         subplot_titles=titles,
                         horizontal_spacing=0.002,
                         shared_yaxes=True,
-                        column_widths=[0.9, 0.1],
+                        #column_widths=[0.9, 0.1],
                         specs=specs_def)
 
-    fig.add_trace(table_tracer, row=1, col=1)
+    # change subplots titles positions
+    # lock/link table subplots titles to xaxis2 to force fixed position
+    fig.layout['annotations'][0]['x'] = 0
+    fig.layout['annotations'][0]['xref'] = 'x2'
+    fig.layout['annotations'][0]['xanchor'] = 'left'
 
-    r = 3
+    fig.layout['annotations'][2]['x'] = 0
+    fig.layout['annotations'][2]['xref'] = 'x2'
+    fig.layout['annotations'][2]['xanchor'] = 'left'
+
+    # change title of first scatter
+    fig.layout['annotations'][1]['x'] = 0
+    fig.layout['annotations'][1]['xref'] = 'x1'
+    fig.layout['annotations'][1]['xanchor'] = 'left'
+
+    x = 2
+    for a in fig.layout['annotations'][3:]:
+        a['x'] = 0
+        a['xref'] = 'x{0}'.format(x)
+        a['xanchor'] = 'left'
+        x += 2
+
+    print(fig.layout)
+    # create table with run summary
+    run_summary = create_table_tracer(['Parameter', 'Value'], [list(configs.keys()), list(configs.values())], dict(x=[0, 0.5]))
+    fig.add_trace(run_summary, row=1, col=1)
+
+    # add empty scatter
+    empty_tracer = go.Scatter(x=[1], y=[1],
+                              showlegend=False)
+    fig.add_trace(empty_tracer, row=1, col=2)
+    # update domain of first scatter
+    fig.update_xaxes(domain=[0.53, 1.0], row=1, col=2)
+
+    # add tracer with coverage stats
+    fig.add_trace(table_tracer, row=3, col=1)
+
+    r = 5
     c = 1
     for k, v in line_tracers.items():
         fig.add_trace(v[0], row=r, col=c)
         fig.update_yaxes(title_text='Coverage', row=r, col=c)
-        fig.update_xaxes(title_text='Position', row=r, col=c)
+        fig.update_xaxes(title_text='Position', domain=[0, 0.9], row=r, col=c)
 
         fig.add_trace(hist_tracers[k], row=r, col=c+1)
         fig.update_yaxes(showticklabels=False, ticks='', row=r, col=c+1)
-        fig.update_xaxes(showticklabels=False, ticks='', row=r, col=c+1)
+        fig.update_xaxes(showticklabels=False, ticks='', domain=[0.905, 1.0], row=r, col=c+1)
 
         top_x = assemblies_lengths[k] if max_x is None else max_x
         top_y = coverage_values[k] if max_y is None else max_y
@@ -1471,7 +1509,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
         r += 1
 
     # create shapes for contig boundaries
-    ref_axis = 1
+    ref_axis = 2
     shapes_tracers = []
     for k, v in shapes.items():
         current_shapes = list(shapes[k])
@@ -1489,7 +1527,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
 
         ref_axis += 2
 
-    fig.update_layout(shapes=shapes_tracers)
+    fig.update_layout(shapes=shapes_tracers, clickmode='event')
 
     # disable grid
     fig.update_xaxes(showgrid=False)
@@ -1499,14 +1537,16 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     for annotation in fig.layout.annotations:
         annotation.update(x=0.03)
 
-    # bars with distribution of depth values should be in logscale
-    for i in range(2, len(line_tracers) + 1):
+    # bars with distribution of depth values in logscale
+    for i in range(5, 5+len(line_tracers)):
         fig.update_xaxes(type='log', row=i, col=2)
 
     # line plots need fixed space
-    fig.update_layout(title='Coverage Report',
+    fig.update_layout(title='proBait - Coverage Report',
                       height=200*len(line_tracers)+400,
-                      template='ggplot2')  # plotly_dark, ggplot2
+                      template='ggplot2')#,
+                      #paper_bgcolor='rgba(0,0,0,0)',
+                      #plot_bgcolor='rgba(0,0,0,0)')  # plotly_dark, presentation+ggplot2
 
     output_plot = os.path.join(output_dir, 'report.html')
     plot(fig, filename=output_plot, auto_open=False)
@@ -1527,25 +1567,27 @@ def order_contigs(input_files):
     return ordered_contigs
 
 
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-#output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
-#bait_size = 120
-#bait_offset = 120
-#number_refs = 1
-#bait_identity = 0.95
-#bait_coverage = 1.0
-#bait_region = 10
-#cluster_probes = False
-#cluster_identity = 0.8
-#cluster_coverage = 0.9
-#minlen_contig = 120
-##exclude_regions = None
-#exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-#exclude_pident = 0.7
-#exclude_coverage = 0.7
-#threads = 4
-#fixed_xaxis = True
-#fixed_yaxis = True
+input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+bait_size = 120
+bait_offset = 120
+number_refs = 1
+bait_identity = 1.0
+bait_coverage = 1.0
+bait_region = 10
+cluster_probes = False
+cluster_identity = 0.8
+cluster_coverage = 0.9
+minlen_contig = 120
+#exclude_regions = None
+exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
+exclude_pident = 0.7
+exclude_coverage = 0.7
+threads = 4
+fixed_xaxis = True
+fixed_yaxis = True
+contig_boundaries = 100
+report = True
 
 
 # Add features to control depth of coverage of regions.
@@ -1564,11 +1606,19 @@ def order_contigs(input_files):
 # important to search for options to control mmseqs2 and minimap2 memory usage
 # the process might fail because those tools use too much memory
 # for the step that maps against the human genome, give 1 chromossome at a time
+# add dropdown to change data that is displayed, it will show only regions uncovered before mapping baits!
+# possible to change info shown in table with dropdown as filters?
+# option to receive baits as input and add more baits generated based on input genomes
+# try to use Scattergl and other gl variants to reduce plot size!
+# add graph with baits as nodes to empty scatter plot? (scatterplotgl to deal with many points)
+# or add tree? stats for genomes that are not related with coverage?
+# dropdown to change data displayed on graph based on identity percentage at several thresholds?
+# final table with number of uncovered regions per sample, number of SNPs, number of deletions, insertions, etc.
 def main(input_files, output_dir, minlen_contig, contig_boundaries,
          number_refs, bait_size, bait_offset, bait_identity, bait_coverage,
          bait_region, cluster_probes, cluster_identity, cluster_coverage,
          exclude_regions, exclude_pident, exclude_coverage, threads,
-         plot, fixed_xaxis, fixed_yaxis):
+         report, fixed_xaxis, fixed_yaxis):
 
     if os.path.isdir(output_dir) is False:
         os.mkdir(output_dir)
@@ -1643,19 +1693,44 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
     os.mkdir(depth_files_dir)
     depth_files = [write_depth(k, v[3], depth_files_dir) for k, v in final_info[0].items()]
 
-    # determine contig order from longest to shortest
-    ordered_contigs = order_contigs(genomes)
+    if report is True:
+        # determine contig order from longest to shortest
+        ordered_contigs = order_contigs(genomes)
 
-    # create plots
-    plots_dir = os.path.join(output_dir, 'plots')
-    os.mkdir(plots_dir)
+        # create plots
+        report_dir = os.path.join(output_dir, 'plots')
+        os.mkdir(report_dir)
 
-    ref_ids = [os.path.basename(f).split('.fasta')[0] for f in ref_set]
-    create_report(coverage_info, final_info, plots_dir, short_samples,
-                  ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
-                  nr_contigs)
+        # determine number of exclude regions and total bps
+        exclude_stats = [len(rec) for rec in SeqIO.parse(exclude_regions, 'fasta')]
+        total_bps = sum(exclude_stats)
 
-    print('Coverage report available in {0}'.format(plots_dir))
+        # create dict with config values
+        configs = {'Number of inputs': len(genomes),
+                   'Minimum contig length': minlen_contig,
+                   'Contig boundaries distance': contig_boundaries,
+                   'Number of references': number_refs,
+                   'Bait size': bait_size,
+                   'Bait offset': bait_offset,
+                   'Bait identity': bait_identity,
+                   'Bait coverage': bait_coverage,
+                   'Bait region': bait_region,
+                   'Cluster probes': str(cluster_probes),
+                   'Cluster identity': cluster_identity,
+                   'Cluster coverage': cluster_coverage,
+                   'Exclude regions': '{0} regions ({1}bps)'.format(len(exclude_stats), total_bps),
+                   'Exclude identity': exclude_pident,
+                   'Exclude coverage': exclude_coverage,
+                   'Create report': str(report)}
+
+        ref_ids = [os.path.basename(f).split('.fasta')[0] for f in ref_set]
+        create_report(coverage_info, final_info, report_dir, short_samples,
+                      ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
+                      nr_contigs, configs)
+
+        print('Coverage report available in {0}'.format(report_dir))
+
+    print('Created a set of {0} probes'.format())
 
 
 def parse_arguments():
@@ -1786,8 +1861,8 @@ def parse_arguments():
                         default=1, dest='threads',
                         help='')
 
-    parser.add_argument('--plot', required=False, action='store_true',
-                        dest='plot',
+    parser.add_argument('--report', required=False, action='store_true',
+                        dest='report',
                         help='')
 
     parser.add_argument('--fx', required=False, action='store_true',
