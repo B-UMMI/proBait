@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+
+"""
+
+
+import os
+import math
+import subprocess
+from copy import deepcopy
+from itertools import groupby
+from collections import Counter
+
+import general_utils as gu
+
+
+def run_minimap2(reference, map_fasta, output_file):
+    """ Executes minimap2 to map short sequences
+        to a reference genome.
+
+        Parameters
+        ----------
+        reference : str
+            Path to the FASTA file with the reference.
+        map_fasta : str
+            Path to FASTA file with the short sequences
+            to map against the reference.
+        output_file : str
+            Path to the output file with mapping results.
+
+        Returns
+        -------
+        List with following elements:
+            stdout : list
+                List with stdout from minimap2 in bytes.
+            stderr : list
+                List with the stderr from minimpa2 in bytes.
+    """
+
+    minimap_args = ['minimap2 -I 1G --cs -cx sr {0} {1} > '
+                    '{2}'.format(reference, map_fasta, output_file)]
+
+    minimap_proc = subprocess.Popen(minimap_args,
+                                    shell=True,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+
+    stderr = minimap_proc.stderr.readlines()
+    stdout = minimap_proc.stdout.readlines()
+
+    return [stdout, stderr]
+
+
+def determine_breadth_coverage(intervals, total_bases):
+    """ Determines the percentage and total number of covered
+        bases according to a set of coverage intervals.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+        total_bases : int
+            Total number of bases in the reference.
+
+        Returns
+        -------
+        List with following elements:
+            breadth_coverage : float
+                Percentage of covered bases.
+            covered_bases : int
+                Total number of covered bases.
+    """
+
+    # determine breadth of coverage
+    covered_bases = 0
+    for k, v in intervals.items():
+        for e in v:
+            covered_bases += sum([1 for p, c in e[2].items() if c > 0])
+
+    breadth_coverage = covered_bases / total_bases
+
+    return [breadth_coverage, covered_bases]
+
+
+def determine_depth_coverage(intervals, total_len):
+    """ Determine depth of coverage for a sequence.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+        total_len : int
+            Total length of the sequence.
+
+        Returns
+        -------
+        List with following elements:
+            positions_depth : dict
+                Dictonary with sequence positions and keys
+                and coverage for each position as values.
+            counts : dict
+                Dictionary with coverage values as keys and
+                the total number of positions with that coverage
+                value as values.
+    """
+
+    # create dictionary to add coverage for all positions
+    positions = list(range(0, total_len))
+    positions_depth = {p: 0 for p in positions}
+    # increment coverage values based on intervals
+    for i in intervals:
+        for p, c in i[2].items():
+            positions_depth[p] += c
+
+    # determine coverage distribution
+    counts = sorted(Counter(positions_depth.values()).most_common(),
+                    key=lambda x: x[0])
+
+    return [positions_depth, counts]
+
+
+def single_position_coverage(coverage_info, start):
+    """ Determine if positions in a subsequence are
+        covered based on information in the cs field
+        in a PAF file created by minimpa2.
+
+        Parameters
+        ----------
+        coverage_info : list
+            List with subsequent operations extracted
+            from the cd field in a PAF file created by
+            minimap2.
+        start : int
+            Subsequence start position in the complete
+            sequence.
+
+        Returns
+        -------
+        coverage : dict
+            Dictionary with sequence positions as keys
+            and coverage for each position as values.
+    """
+
+    coverage = {}
+    for m in coverage_info:
+        # subsequence part with exact matches
+        if m[0] == ':':
+            # create dctionary entries with coverage = 1
+            new_cov = {i: 1 for i in range(start, start+int(m[1:]))}
+            coverage = {**coverage, **new_cov}
+            # increment start position
+            start = start + int(m[1:])
+        # position with substitution
+        elif m[0] == '*':
+            coverage[start] = 0
+            start += 1
+        # position with deletion
+        elif m[0] == '-':
+            # coverage 0 for missing bases
+            new_cov = {i: 0 for i in range(start, start+len(m[1:]))}
+            coverage = {**coverage, **new_cov}
+            start = start + len(m[1:])
+        # insertion
+        elif m[0] == '+':
+            # do not add coverage values for positions because
+            # insertion does not exist in reference
+            pass
+
+    return coverage
+
+
+def write_depth(identifier, depth_values, output_dir):
+    """
+    """
+
+    depth_file = os.path.join(output_dir, identifier+'_depth.tsv')
+    depth_lines = []
+    for k, v in depth_values.items():
+        depth_lines.append(k)
+        depth_lines.extend(['{0}\t{1}'.format(p, e) for p, e in v[0].items()])
+
+    gu.write_lines(depth_lines, depth_file)
+
+    return depth_file
+
+
+
+def determine_small_bait(span, bait_size, start, stop, sequence_length):
+    """ Determines baits for regions shorter than bait length.
+
+        Parameters
+        ----------
+        span : int
+            Length of the region that is not covered.
+        bait_size : int
+            Bait size in bases.
+        start : int
+            Start position of the subsequence that is
+            not covered.
+        stop : int
+            Stop position of the subsequence that is
+            not covered.
+        sequence_length : int
+            Total length of the sequence.
+
+        Returns
+        -------
+        bait_interval : list
+            List with the start and stop position for
+            the determined bait.
+    """
+
+    rest = bait_size - span
+    bot = math.floor(rest / 2)
+    top = math.ceil(rest / 2)
+    if start == 0:
+        bait_interval = [start, start + bait_size]
+    elif (start - bot) < 0:
+        bait_interval = [0, top+(bot-start)]
+    elif (stop + top) > sequence_length:
+        bait_interval = [start-(bot+(top-(sequence_length-stop))), sequence_length]
+    else:
+        bait_interval = [start-bot, stop+top]
+
+    return bait_interval
+
+
+def determine_interval_baits(bait_size, start, stop):
+    """ Determines baits for regions with length value
+        equal or greater than bait size.
+
+        Parameters
+        ----------
+        bait_size : int
+            Bait size in bases.
+        start : int
+            Start position of the subsequence that is
+            not covered.
+        stop : int
+            Stop position of the subsequence that is
+            not covered.
+
+        Returns
+        -------
+        probes : list of list
+            List with one sublist per determined bait.
+            Each sublist has the start and stop position
+            for a bait.
+    """
+
+    probes = []
+    reach = False
+    while reach is False:
+        if (start + bait_size) == stop:
+            bait_interval = [start, stop]
+            reach = True
+        elif (start + bait_size) > stop:
+            diff = (start + bait_size) - stop
+            bot_plus = start - diff
+            bait_interval = [bot_plus, stop]
+            reach = True
+        else:
+            bait_interval = [start, start + bait_size]
+            start = start + bait_size
+        probes.append(bait_interval)
+
+    return probes
+
+
+def merge_intervals(intervals):
+    """ Merges intersecting intervals.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+
+        Returns
+        -------
+        merged : list
+            Dictionary with the result of merging intervals
+            that overlapped (coverage data is updated and
+            incremented for positions in common).
+    """
+
+    merged = [deepcopy(intervals[0])]
+    for current in intervals[1:]:
+        previous = merged[-1]
+        # current and previous intervals intersect
+        if current[0] <= previous[1]:
+            # determine top position
+            previous[1] = max(previous[1], current[1])
+            # merge coverage dictionaries
+            previous_cov = previous[2]
+            current_cov = current[2]
+            for k, v in current_cov.items():
+                if k not in previous_cov:
+                    previous_cov[k] = v
+                else:
+                    previous_cov[k] += v
+            previous[2] = previous_cov
+        # current and previous intervals do not intersect
+        else:
+            merged.append(deepcopy(current))
+
+    return merged
+
+
+def determine_missing_intervals(intervals, identifier, total_len):
+    """ Determines sequence intervals that are not covered by any
+        probes.
+
+        Parameters
+        ----------
+        intervals : dict
+            Dictionary with sequence identifiers as keys
+            and a list of lists as values. Each sublist has
+            a start and stop position in the sequence and
+            a dictionary with the coverage for every position
+            in the sequence interval.
+        identifier : str
+            Sequence identifier.
+        total_len : int
+            Total length of the sequence.
+
+        Returns
+        -------
+        List with following elements:
+            missing_regions : dict
+                Dictionary with sequence identifiers as keys
+                a list of lists as values. Each sublist has
+                the start and stop positions for a sequence
+                interval that is not covered by probes.
+            not_covered : int
+                Total number of bases not covered by probes.
+    """
+
+    start = 0
+    not_covered = 0
+    missing_regions = {identifier: []}
+    for i in intervals:
+        diff = i[0] - start
+        if diff > 0:
+            missing_regions[identifier].append([start, start+diff])
+            not_covered += diff
+            start += diff
+
+        # create groups of equal values
+        values_groups = [list(j) for i, j in groupby(i[2].values())]
+        for g in values_groups:
+            if g[0] == 0:
+                missing_regions[identifier].append([start, start+len(g)])
+                not_covered += len(g)
+                start += len(g)
+            else:
+                start += len(g)
+
+    # add terminal region
+    if start != total_len:
+        missing_regions[identifier].append([start, total_len])
+        not_covered += total_len - start
+
+    return [missing_regions, not_covered]
+
+
+def cover_intervals(intervals, total_len, bait_size, bait_region):
+    """ Determines baits to cover specified sequence regions.
+
+        Parameters
+        ----------
+        intervals : list
+            List of lists. Each sublist has start and stop
+            positions for sequence regions with no coverage.
+        total_len : int
+            Total length of the sequence.
+        bait_size : int
+            Bait size in bases.
+        bait_region : int
+            Minimum length of the region with no coverage.
+            Baits will not be determined to cover regions
+            that are shorter than this value.
+
+        Returns
+        -------
+        cover_baits : list
+            List of lists. Each sublist has the start and
+            stop positions for a bait.
+    """
+
+    cover_baits = []
+    for i in intervals:
+        span = i[1] - i[0]
+        if span >= bait_region:
+            if span < bait_size:
+                bait_interval = determine_small_bait(span, bait_size,
+                                                     i[0], i[1],
+                                                     total_len)
+                cover_baits.append(bait_interval)
+            # will slide and determine baits
+            # if in the last iter, uncovered region is very small it will overlap
+            # with regions that are already covered and increase depth of coverage
+            # pass bait_region as arg to stop determining when region is too small?
+            elif span >= bait_size:
+                probes = determine_interval_baits(bait_size, i[0], i[1])
+                cover_baits.extend(probes)
+
+    return cover_baits
