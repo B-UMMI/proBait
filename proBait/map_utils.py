@@ -12,7 +12,10 @@ from copy import deepcopy
 from itertools import groupby
 from collections import Counter
 
-import general_utils as gu
+try:
+    import general_utils as gu
+except:
+    import proBait.general_utils as gu
 
 
 def run_minimap2(reference, map_fasta, output_file):

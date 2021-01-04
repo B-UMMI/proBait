@@ -8,7 +8,10 @@
 import os
 import subprocess
 
-import general_utils as gu
+try:
+    import general_utils as gu
+except:
+    import proBait.general_utils as gu
 
 
 def create_mmseqs_db(input_file, output_db):

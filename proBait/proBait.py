@@ -11,12 +11,19 @@ import argparse
 
 from Bio import SeqIO
 
-import map_utils as mu
-import report_utils as ru
-import cluster_utils as cu
-import general_utils as gu
+try:
+    import map_utils as mu
+    import report_utils as ru
+    import cluster_utils as cu
+    import general_utils as gu
+except:
+    import proBait.map_utils as mu
+    import proBait.report_utils as ru
+    import proBait.cluster_utils as cu
+    import proBait.general_utils as gu
 
 
+#output_dir = first_dir
 def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
                                bait_coverage, bait_identity, bait_region,
                                nr_contigs, short_samples, generate=False,
@@ -36,8 +43,11 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
     print('-'*len(header))
 
     total = 0
+    discarded_baits_files = []
+    missing_files = []
     coverage_info = {}
     for g in genomes:
+        invalid_mappings = []
         gbasename = os.path.basename(g).split('.fasta')[0]
         paf_path = os.path.join(output_dir, gbasename+'.paf')
 
@@ -55,18 +65,42 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
                         for line in paf_lines
                         if int(line[10]) >= (bait_coverage*bait_size)]
 
+        invalid_mappings.extend([line
+                                 for line in paf_lines
+                                 if int(line[10]) < (bait_coverage*bait_size)])
+
         # compute alignment identity
         for i in range(len(valid_length)):
             valid_length[i].append(int(valid_length[i][9]) / int(valid_length[i][10]))
+        
+        for i in range(len(invalid_mappings)):
+            invalid_mappings[i].append(int(invalid_mappings[i][9]) / int(invalid_mappings[i][10]))
 
         # filter out alignments below defined identity
         valid_pident = [line for line in valid_length if line[-1] >= bait_identity]
+
+        invalid_mappings.extend([line for line in valid_length if line[-1] < bait_identity])
 
         # match alignment string with regex
         pattern = r':[0-9]+|\*[a-z][a-z]|\+[a-z]+|-[a-z]+'
         for i in range(len(valid_pident)):
             current = valid_pident[i][-2]
             valid_pident[i].append(gu.regex_matcher(current, pattern))
+
+        # process alignment string for discarded baits
+        for i in range(len(invalid_mappings)):
+            current = invalid_mappings[i][-2]
+            invalid_mappings[i].append(gu.regex_matcher(current, pattern))
+
+        # get info that matters from discarded baits
+        discarded = {}
+        for l in invalid_mappings:
+            discarded.setdefault(l[5], []).append([int(l[7]), int(l[8]), l[-1]])
+
+        # save info about discarded baits
+        discarded_file = os.path.join(output_dir, '{0}_discarded'.format(gbasename))
+        discarded_baits_files.append(discarded_file)
+        gu.pickle_dumper(discarded, discarded_file)
 
         # get information about positions that match to determine coverage
         for i in range(len(valid_pident)):
@@ -99,6 +133,11 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
         missing.extend(not_mapped)
 
         missing_regions = {k: v for i in missing for k, v in i[0].items()}
+        # save missing intervals
+        missing_file = os.path.join(output_dir, '{0}_missing'.format(gbasename))
+        missing_files.append(missing_file)
+        gu.pickle_dumper(missing_regions, missing_file)
+
         not_covered = sum([i[1] for i in missing])
 
         coverage_info[gbasename] = [*coverage, not_covered]
@@ -147,7 +186,7 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
 
     print('-'*len(header))
 
-    return [coverage_info, total]
+    return [coverage_info, total, discarded_baits_files, missing_files]
 
 
 def exclude_similar_probes(unique_baits, clustering_dir, cluster_identity,
@@ -244,7 +283,201 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
     return [final_baits, multispecific_probes]
 
 
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+# color contig regions that were not covered by probes and that were used
+# to generate new probes in different color (add arrows to start and stop)
+def create_report(initial_data, final_data, output_dir, short_ids,
+                  ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
+                  nr_contigs, configs, baits_pos):
+    """
+    """
+
+    # check if user wants equal yaxis ranges for all line plots
+    max_x = None
+    assemblies_lengths = {k.split('.fasta')[0]: v for k, v in nr_contigs.items()}
+    if fixed_xaxis is True:
+        max_x = max([v[2] for v in assemblies_lengths.values()])
+
+    max_y = None
+    coverage_values = {k: max(list(v[4].keys())) for k, v in final_data[0].items()}
+    if fixed_yaxis is True:
+        max_y = max(coverage_values.values())
+
+    table_tracer = ru.coverage_table(initial_data[0], final_data[0], short_ids, ref_ids,
+                                     assemblies_lengths)
+
+    # depth of coverage values distribution
+    hist_tracers = ru.depth_hists({k: v[4] for k, v in final_data[0].items()})
+
+    # depth of coverage per position
+    line_tracers, shapes = ru.depth_lines({k: v[3]
+                                           for k, v in final_data[0].items()},
+                                          ordered_contigs)
+
+    # baits start position per input
+    baits_tracers = {k: ru.baits_tracer(baits_pos[k.split('.')[0]], v)
+                     for k, v in ordered_contigs.items() if k.split('.')[0] in baits_pos}
+
+    nr_rows = len(line_tracers) + 4
+    titles = ['Summary', 'Configs', 'Coverage statistics']
+    for s in list(short_ids.values()):
+        titles += [s, '']
+
+    specs_def = [[None,
+                  {'type': 'table', 'rowspan': 2, 'colspan': 1}],
+                 [None,
+                  None],
+                 [{'type': 'table', 'rowspan': 2, 'colspan': 2},
+                  None],
+                 [None,
+                  None]] + \
+                 [[{'type': 'scatter'}, {'type': 'bar'}]]*len(line_tracers)
+
+    fig = ru.create_subplots_fig(nr_rows, 2, titles, specs_def, True)
+
+    # change subplots titles positions
+    # lock/link table subplots titles to xaxis2 to force fixed position
+    fig.layout.annotations[0].update(x=0, xref='paper', xanchor='left')
+
+    fig.layout.annotations[1].update(x=0.5, xref='paper', xanchor='left',
+                                     y=1.0000000000000002)
+
+    fig.layout.annotations[2].update(x=0, xref='paper', xanchor='left',
+                                     y=0.892)
+
+    for a in fig.layout.annotations[3:]:
+        a.update(x=0, xref='paper', xanchor='left')
+
+    # create table with run summary
+    run_summary = ru.create_table_tracer(['Parameter', 'Value'],
+                                         [list(configs.keys()), list(configs.values())],
+                                          dict(x=[0, 0.25], y=[0, 1.0]))
+    fig.add_trace(run_summary, row=1, col=2)
+
+    # add tracer with coverage stats
+    fig.add_trace(table_tracer, row=3, col=1)
+
+    r = 5
+    c = 1
+    for k, v in line_tracers.items():
+        # add tracer with depth per position
+        fig.add_trace(v[0], row=r, col=c)
+        fig.update_yaxes(title_text='Coverage', row=r, col=c)
+        fig.update_xaxes(title_text='Position', domain=[0, 0.9], row=r, col=c)
+
+        # add tracer with baits start position
+        fig.add_trace(baits_tracers[k], row=r, col=c)
+
+        # add tracer with depth values distribution
+        fig.add_trace(hist_tracers[k], row=r, col=c+1)
+        fig.update_yaxes(showticklabels=False, ticks='', row=r, col=c+1)
+        fig.update_xaxes(showticklabels=False, ticks='', zeroline=False, domain=[0.905, 1.0], row=r, col=c+1)
+
+        top_x = assemblies_lengths[k] if max_x is None else max_x
+        top_y = coverage_values[k] if max_y is None else max_y
+
+        # adjust axis range
+        fig.update_xaxes(range=[-0.2, top_x], row=r, col=c)
+        #fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=r, col=c)
+        #fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=r, col=c+1)
+
+        r += 1
+
+    # create shapes for contig boundaries
+    ref_axis = 1
+    shapes_tracers = []
+    for k, v in shapes.items():
+        current_shapes = list(shapes[k])
+        y_value = coverage_values[k] if max_y is None else max_y
+        for s in current_shapes:
+            axis_str = '' if ref_axis == 1 else ref_axis
+            xref = 'x{0}'.format(axis_str)
+            yref = 'y{0}'.format(axis_str)
+            # do not create line for last contig
+            if s != current_shapes[-1]:
+                # only create tracer for end position
+                # start position is equal to end position of previous contig
+                shape_tracer = ru.create_shape(xref, yref, [s[1], s[1]], [0, y_value])
+                shapes_tracers.append(shape_tracer)
+
+        ref_axis += 2
+
+    fig.update_layout(shapes=shapes_tracers, clickmode='event')
+
+    # disable grid
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=False)
+
+    # bars with distribution of depth values in logscale
+    for i in range(5, 5+len(line_tracers)):
+        fig.update_xaxes(type='log', row=i, col=2)
+
+    # add summary text
+    fig.add_annotation(dict(font=dict(size=16),
+                            showarrow=False,
+                            text='Lorem Ipsum<br>Lorem Ipsum2',
+                            x=0,
+                            xanchor='left',
+                            xref='paper',
+                            y=0.97,
+                            yanchor='bottom',
+                            yref='paper'))
+
+    # add version at end
+    fig.add_annotation(dict(font=dict(size=14),
+                            showarrow=False,
+                            text='Generated with proBait v0.1.0',
+                            x=1,
+                            xanchor='right',
+                            xref='paper',
+                            y=-0.02,
+                            yanchor='bottom',
+                            yref='paper'))
+
+    # add button to update line plots with depth of coverage per position,
+    # uncovered regions and position of generated baits
+    depth_yaxis = {'yaxis{0}.range'.format(i): [0-max_y*0.08, max_y+(max_y*0.08)] for i in range(2, len(line_tracers)*2)}
+    depth_yaxis['yaxis.range'] = [0-max_y*0.08, max_y+(max_y*0.08)]
+
+    baits_yaxis = {'yaxis{0}.range'.format(i): [0, 0.6] for i in range(3, len(line_tracers)*2, 2)}
+    baits_yaxis['yaxis.range'] = [0, 0.6]
+
+    # add option to remove yaxis
+    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.showticklabels'.format(i): False for i in range(3, len(line_tracers)*2, 2)}}
+    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.ticks'.format(i): '' for i in range(3, len(line_tracers)*2, 2)}}
+    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.zeroline'.format(i): False for i in range(3, len(line_tracers)*2, 2)}}
+    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.showline'.format(i): False for i in range(3, len(line_tracers)*2, 2)}}
+    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.title'.format(i): '' for i in range(3, len(line_tracers)*2, 2)}}
+
+    buttons = [dict(label='Depth',
+                    method='update',
+                    args=[{'visible': [True, True]+[True, False, True]*len(line_tracers)},
+                          depth_yaxis]),
+               dict(label='Baits',
+                    method='update',
+                    args=[{'visible': [True, True]+[False, True, False]*len(line_tracers)},
+                          baits_yaxis])]
+
+    updatemenus = [dict(active=0, buttons=buttons, x=1, xanchor='auto', y=0.80, yanchor='auto')]
+
+    fig.update_layout(updatemenus=updatemenus)
+
+    # line plots need fixed space
+    fig.update_layout(title='proBait - Coverage Report',
+                      height=200*len(line_tracers)+400,
+                      template='plotly_white')
+                      #paper_bgcolor='rgba(0,0,0,0)',
+                      #plot_bgcolor='rgba(0,0,0,0)')  # plotly_white, plotly_dark, presentation+ggplot2
+
+    #print(fig.layout)
+
+    output_plot = os.path.join(output_dir, 'report.html')
+    ru.create_html_report(fig, output_plot)
+
+    return fig
+
+
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/test_assemblies'
 output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
 bait_size = 120
 bait_offset = 120
@@ -283,15 +516,22 @@ report = True
 # important to search for options to control mmseqs2 and minimap2 memory usage
 # the process might fail because those tools use too much memory
 # for the step that maps against the human genome, give 1 chromossome at a time
-# add dropdown to change data that is displayed, it will show only regions uncovered before mapping baits!
 # possible to change info shown in table with dropdown as filters?
 # option to receive baits as input and add more baits generated based on input genomes
-# try to use Scattergl and other gl variants to reduce plot size!
-# add graph with baits as nodes to empty scatter plot? (scatterplotgl to deal with many points)
-# or add tree? stats for genomes that are not related with coverage?
-# dropdown to change data displayed on graph based on identity percentage at several thresholds?
 # final table with number of uncovered regions per sample, number of SNPs, number of deletions, insertions, etc.
-def main(input_files, output_dir, minlen_contig, contig_boundaries,
+# add boxplot with distribution of identity values for mapped baits against each genome
+# color baits according to feature that led to bait creation (insertion, deletion, etc)
+# detect missing regions that are close and can be included in same probe.
+# plot with markers representing baits should also have the following lines:
+# - Lines for the intervals of baits that were accepted (green?)
+# - Lines for intervals of baits that were not accepted (red?)
+# - Lines for regions that had no baits mapped
+# The lines for baits that were not accepted should also have information
+# about why the baits were not accepted (include SNO, deletion, insertion
+# info somehow...). Adding these lines should not increase report file size
+# that much because each interval will only have 2 points to represent
+# accepted baits, refused baits or uncovered regions.
+def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
          number_refs, bait_size, bait_offset, bait_identity, bait_coverage,
          bait_region, cluster_probes, cluster_identity, cluster_coverage,
          exclude_regions, exclude_pident, exclude_coverage, threads,
@@ -333,8 +573,10 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
 
     # start mapping baits against remaining genomes
     # mapping against ref_set to cover missing regions
+    bait_creation_dir = os.path.join(output_dir, 'incremental_bait_creation')
+    os.mkdir(bait_creation_dir)
     coverage_info = incremental_bait_generator(genomes, unique_baits,
-                                               output_dir, bait_size,
+                                               bait_creation_dir, bait_size,
                                                bait_coverage, bait_identity,
                                                bait_region, nr_contigs,
                                                short_samples,
@@ -359,7 +601,9 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
 
     # determine breadth of coverage for all assemblies
     # and depth of coverage for each base
-    final_info = incremental_bait_generator(genomes, unique_baits, output_dir,
+    final_coverage_dir = os.path.join(output_dir, 'final_coverage')
+    os.mkdir(final_coverage_dir)
+    final_info = incremental_bait_generator(genomes, unique_baits, final_coverage_dir,
                                             bait_size, bait_coverage,
                                             bait_identity, bait_region,
                                             nr_contigs, short_samples,
@@ -375,12 +619,21 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
         ordered_contigs = gu.order_contigs(genomes)
 
         # create plots
-        report_dir = os.path.join(output_dir, 'plots')
+        report_dir = os.path.join(output_dir, 'report_data')
         os.mkdir(report_dir)
 
         # determine number of exclude regions and total bps
         exclude_stats = [len(rec) for rec in SeqIO.parse(exclude_regions, 'fasta')]
         total_bps = sum(exclude_stats)
+
+        # get baits positions in genomes
+        baits_records = SeqIO.parse(unique_baits, 'fasta')
+        baits_pos = {s: {} for s in short_samples.values()}
+        for rec in baits_records:
+            genome = (rec.id).split('_')[0]
+            pos = (rec.id).split('_')[-1]
+            contig = (rec.id).split('_{0}'.format(pos))[0]
+            baits_pos[genome].setdefault(contig, []).append(pos)
 
         # create dict with config values
         configs = {'Number of inputs': len(genomes),
@@ -397,13 +650,13 @@ def main(input_files, output_dir, minlen_contig, contig_boundaries,
                    'Cluster coverage': cluster_coverage,
                    'Exclude regions': '{0} regions ({1}bps)'.format(len(exclude_stats), total_bps),
                    'Exclude identity': exclude_pident,
-                   'Exclude coverage': exclude_coverage,
-                   'Create report': str(report)}
+                   'Exclude coverage': exclude_coverage}
 
         ref_ids = [os.path.basename(f).split('.fasta')[0] for f in ref_set]
-        ru.create_report(coverage_info, final_info, report_dir, short_samples,
-                         ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
-                         nr_contigs, configs)
+        test_fig = create_report(coverage_info, final_info, report_dir,
+                                 short_samples, ordered_contigs, fixed_xaxis,
+                                 fixed_yaxis, ref_ids, nr_contigs,
+                                 configs, baits_pos)
 
         print('Coverage report available in {0}'.format(report_dir))
 
@@ -425,6 +678,12 @@ def parse_arguments():
                         help='Path to the output directory where '
                              'files will be saved to (must not exist, '
                              'process will create this directory).')
+
+    parser.add_argument('--m', type=str, required=False,
+                        choices=['inclusive', 'exclusive'],
+                        default='inclusive',
+                        dest='mode',
+                        help='')
 
     parser.add_argument('--mc', type=int, required=False,
                         default=360,
