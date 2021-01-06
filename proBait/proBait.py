@@ -8,6 +8,7 @@
 import os
 import sys
 import argparse
+from copy import deepcopy
 
 from Bio import SeqIO
 
@@ -23,7 +24,6 @@ except:
     import proBait.general_utils as gu
 
 
-#output_dir = first_dir
 def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
                                bait_coverage, bait_identity, bait_region,
                                nr_contigs, short_samples, generate=False,
@@ -52,7 +52,7 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
         paf_path = os.path.join(output_dir, gbasename+'.paf')
 
         contigs = gu.import_sequences(g)
-        total_bases = nr_contigs[g][2]
+        total_bases = nr_contigs[gbasename][2]
 
         minimap_std = mu.run_minimap2(g, unique_baits, paf_path)
 
@@ -160,7 +160,7 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
             total += len(new_baits_lines)
 
             print('{0:<30}  {1:^10.4f}  {2:^10}  {3:^10}  '
-                  '{4:^7}'.format(short_samples[g], coverage[0],
+                  '{4:^7}'.format(short_samples[gbasename], coverage[0],
                                   coverage[1], not_covered,
                                   len(new_baits_lines)))
 
@@ -181,7 +181,7 @@ def incremental_bait_generator(genomes, unique_baits, output_dir, bait_size,
 
         if generate is False:
             print('{0:<30}  {1:^10.4f}  {2:^10}  '
-                  '{3:^10}'.format(short_samples[g], coverage[0],
+                  '{3:^10}'.format(short_samples[gbasename], coverage[0],
                                    coverage[1], not_covered))
 
     print('-'*len(header))
@@ -282,12 +282,18 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
 
     return [final_baits, multispecific_probes]
 
-
+##############
+############## Baits positions are wrong!!! (offset of -1 in each position?)
+initial_data = coverage_info
+final_data = final_info
+output_dir = report_dir
+short_ids = short_samples
 # color contig regions that were not covered by probes and that were used
 # to generate new probes in different color (add arrows to start and stop)
 def create_report(initial_data, final_data, output_dir, short_ids,
                   ordered_contigs, fixed_xaxis, fixed_yaxis, ref_ids,
-                  nr_contigs, configs, baits_pos):
+                  nr_contigs, configs, baits_pos, total_baits,
+                  initial_baits, iter_baits):
     """
     """
 
@@ -302,6 +308,17 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     if fixed_yaxis is True:
         max_y = max(coverage_values.values())
 
+    # create table with run summary
+    config_table = ru.create_table_tracer(['Parameter', 'Value'],
+                                         dict(size=16),
+                                         dict(color='#ffffff', width=2),
+                                         dict(color='#9ecae1'),
+                                         [list(configs.keys()), list(configs.values())],
+                                         dict(size=14),
+                                         dict(color='#ffffff', width=1),
+                                         dict(color='#f0f0f0'),
+                                         dict(x=[0.5, 1.0], y=[0.2, 1.0]))
+
     table_tracer = ru.coverage_table(initial_data[0], final_data[0], short_ids, ref_ids,
                                      assemblies_lengths)
 
@@ -313,16 +330,43 @@ def create_report(initial_data, final_data, output_dir, short_ids,
                                            for k, v in final_data[0].items()},
                                           ordered_contigs)
 
+    # line tracers for accepted baits, discarded baits and uncovered regions
+#    discarded = {os.path.basename(f).split('_discarded')[0]: f for f in initial_data[2]}
+#    merged_discarded = {}
+#    for k, v in ordered_contigs.items():
+#        start = 0
+#        discarded_file = discarded[k]
+#        data = gu.pickle_loader(discarded_file)
+#        merged_discarded[k] = {}
+#        discarded_tracers[k] = []
+#        for c in ordered_contigs[k]:
+#            if c[0] in data:
+#                sorted_intervals = sorted(data[c[0]], key=lambda x: x[0])
+#                merged = [deepcopy(sorted_intervals[0])]
+#                for i in sorted_intervals[1:]:
+#                    previous = merged[-1]
+#                    # current and previous intervals intersect
+#                    if i[0] <= previous[1]:
+#                        # determine top position
+#                        previous[1] = max(previous[1], i[1])
+#                        previous[2].extend(i[2])
+#                    else:
+#                        merged.append(deepcopy(i))
+#
+#                merged_discarded[k][c[0]] = [[i[0]+start, i[1]+start, i[2]] for i in merged]
+#                start += c[1]
+
+
     # baits start position per input
     baits_tracers = {k: ru.baits_tracer(baits_pos[k.split('.')[0]], v)
                      for k, v in ordered_contigs.items() if k.split('.')[0] in baits_pos}
 
     nr_rows = len(line_tracers) + 4
-    titles = ['Summary', 'Configs', 'Coverage statistics']
+    titles = [' ', '<b>Configuration</b>', '<b>Coverage statistics</b>']
     for s in list(short_ids.values()):
-        titles += [s, '']
+        titles += ['<b>{0}</b>'.format(s), '']
 
-    specs_def = [[None,
+    specs_def = [[{'type': 'table', 'rowspan': 2, 'colspan': 1},
                   {'type': 'table', 'rowspan': 2, 'colspan': 1}],
                  [None,
                   None],
@@ -330,28 +374,46 @@ def create_report(initial_data, final_data, output_dir, short_ids,
                   None],
                  [None,
                   None]] + \
-                 [[{'type': 'scatter'}, {'type': 'bar'}]]*len(line_tracers)
+                [[{'type': 'scatter', 'rowspan': 1, 'colspan': 1},
+                  {'type': 'bar', 'rowspan': 1, 'colspan': 1}]]*len(line_tracers)
 
-    fig = ru.create_subplots_fig(nr_rows, 2, titles, specs_def, True)
+    # define figure height
+    height = int(190*len(line_tracers) + 150*(len(line_tracers)/4) + 505)
+    plots_percentage = round((190*len(line_tracers)) / height, 2)
+    coverage_table_percentage = round((150*(len(line_tracers)/4)) / height, 2)
+    summary_table_percentage = round(1 - (plots_percentage+coverage_table_percentage), 2)
+
+    # determine row heights
+    plot_height = plots_percentage / len(line_tracers)
+
+    row_heights = [summary_table_percentage/2]*2 +\
+                  [coverage_table_percentage/2]*2 +\
+                  [plot_height]*(len(line_tracers))
+
+    # adding vertical_spacing in combination with row_heights can
+    # exceed valid values and lead to error
+    fig = ru.create_subplots_fig(nr_rows, 2, titles, specs_def, shared_yaxes=True,
+                                 row_heights=row_heights)
 
     # change subplots titles positions
-    # lock/link table subplots titles to xaxis2 to force fixed position
-    fig.layout.annotations[0].update(x=0, xref='paper', xanchor='left')
+    subplot12_x = fig.get_subplot(1, 2).x[0]
+    subplot12_y = fig.get_subplot(1, 2).y[1]
+    fig.layout.annotations[1].update(x=subplot12_x, xref='paper',
+                                     xanchor='left', y=subplot12_y,
+                                     font=dict(size=18))
 
-    fig.layout.annotations[1].update(x=0.5, xref='paper', xanchor='left',
-                                     y=1.0000000000000002)
-
-    fig.layout.annotations[2].update(x=0, xref='paper', xanchor='left',
-                                     y=0.892)
+    # get topmost y coordinate for subplot with coverage stats
+    subplot31_x = fig.get_subplot(3, 1).x[0]
+    subplot31_y = fig.get_subplot(3, 1).y[1]
+    fig.layout.annotations[2].update(x=subplot31_x, xref='paper',
+                                     xanchor='left', y=subplot31_y,
+                                     font=dict(size=18))
 
     for a in fig.layout.annotations[3:]:
-        a.update(x=0, xref='paper', xanchor='left')
+        a.update(x=0, xref='paper', xanchor='left',
+                 font=dict(size=18))
 
-    # create table with run summary
-    run_summary = ru.create_table_tracer(['Parameter', 'Value'],
-                                         [list(configs.keys()), list(configs.values())],
-                                          dict(x=[0, 0.25], y=[0, 1.0]))
-    fig.add_trace(run_summary, row=1, col=2)
+    fig.add_trace(config_table, row=1, col=2)
 
     # add tracer with coverage stats
     fig.add_trace(table_tracer, row=3, col=1)
@@ -361,8 +423,8 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     for k, v in line_tracers.items():
         # add tracer with depth per position
         fig.add_trace(v[0], row=r, col=c)
-        fig.update_yaxes(title_text='Coverage', row=r, col=c)
-        fig.update_xaxes(title_text='Position', domain=[0, 0.9], row=r, col=c)
+        fig.update_yaxes(title_text='Coverage', title_font_size=16, row=r, col=c)
+        fig.update_xaxes(title_text='Position', title_font_size=16, domain=[0, 0.9], row=r, col=c)
 
         # add tracer with baits start position
         fig.add_trace(baits_tracers[k], row=r, col=c)
@@ -377,18 +439,21 @@ def create_report(initial_data, final_data, output_dir, short_ids,
 
         # adjust axis range
         fig.update_xaxes(range=[-0.2, top_x], row=r, col=c)
-        #fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=r, col=c)
-        #fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=r, col=c+1)
+        y_tickvals = list(range(0, top_y, int(top_y/4))) + [top_y]
+        fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], tickvals=y_tickvals, row=r, col=c)
+        fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=r, col=c+1)
 
         r += 1
 
     # create shapes for contig boundaries
     ref_axis = 1
     shapes_tracers = []
+    hidden_tracers = []
+    start_hidden = 5
     for k, v in shapes.items():
         current_shapes = list(shapes[k])
         y_value = coverage_values[k] if max_y is None else max_y
-        for s in current_shapes:
+        for i, s in enumerate(current_shapes):
             axis_str = '' if ref_axis == 1 else ref_axis
             xref = 'x{0}'.format(axis_str)
             yref = 'y{0}'.format(axis_str)
@@ -397,78 +462,105 @@ def create_report(initial_data, final_data, output_dir, short_ids,
                 # only create tracer for end position
                 # start position is equal to end position of previous contig
                 shape_tracer = ru.create_shape(xref, yref, [s[1], s[1]], [0, y_value])
+                # create invisible scatter to add hovertext
+                hovertext = [s[2], current_shapes[i+1][2]]
+                hover_str = '<b><--{0}<b><br><b>{1}--><b>'.format(*hovertext)
+                hidden_ticks = list(range(1, top_y, int(top_y/4)))+[top_y]
+                hidden_tracer = ru.create_scatter([s[1]]*len(hidden_ticks),
+                                                  hidden_ticks,
+                                                  mode='lines',
+                                                  hovertext=[hover_str]*y_value)
+                hidden_tracers.append([hidden_tracer, start_hidden, 1])
                 shapes_tracers.append(shape_tracer)
 
         ref_axis += 2
+        start_hidden += 1
 
     fig.update_layout(shapes=shapes_tracers, clickmode='event')
 
+    # add hidden tracers
+    for t in hidden_tracers:
+        fig.add_trace(t[0], t[1], t[2])
+
     # disable grid
     fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=False)
+    fig.update_yaxes(showgrid=False, showline=True, linecolor='black')
 
     # bars with distribution of depth values in logscale
     for i in range(5, 5+len(line_tracers)):
         fig.update_xaxes(type='log', row=i, col=2)
 
+    annotations_topy = fig.get_subplot(5, 1).yaxis.domain[1]
+    annotations_boty = fig.get_subplot(5, 1).yaxis.domain[0]
+    annotations_y = annotations_topy + (annotations_topy-annotations_boty) / 2.5
+
+    fig.add_annotation(x=0, xref='paper', xanchor='left',
+                       y=annotations_y, yref='paper',
+                       yanchor='bottom',
+                       text='<b>Depth per position</b>',
+                       showarrow=False,
+                       font=dict(size=18))
+
+    fig.add_annotation(x=0.905, xref='paper', xanchor='left',
+                       y=annotations_y, yref='paper',
+                       yanchor='middle',
+                       text='<b>Depth values<br>distribution (log)</b>',
+                       showarrow=False,
+                       font=dict(size=18))
+
     # add summary text
-    fig.add_annotation(dict(font=dict(size=16),
-                            showarrow=False,
-                            text='Lorem Ipsum<br>Lorem Ipsum2',
-                            x=0,
-                            xanchor='left',
-                            xref='paper',
-                            y=0.97,
-                            yanchor='bottom',
-                            yref='paper'))
+    summary_text = ('Generated a total of <b>{0}</b> baits.<br>'
+                    'An initial set of {1} baits was generated by decomposing 1 '
+                    'reference(s) into baits of size {2}bps with an offset of {3}.'
+                    '<br>An additional set of {4} baits were generated through '
+                    'the iterative process of mapping the initial set of '
+                    'baits against all<br>inputs and generating new baits for regions that '
+                    'did not have any mapped baits or had mapped '
+                    'baits without sufficient<br>identity and/or coverage.<br>'
+                    '<br>The report has the following sections:<br>'
+                    '    <b>- Configuration:</b> values passed to proBait\'s parameters.<br>'
+                    '    <b>- Coverage statistics:</b> coverage statistics determined by mapping '
+                    'the final set of baits against each input.<br>'
+                    '    <b>- Depth per position:</b> depth of coverage per position. Vertical '
+                    'dashed lines are contig boundaries and green<br>'
+                    '      markers along the xaxis zeroline are the start positions of baits '
+                    'that were generated to cover regions not<br>'
+                    '      covered by baits. Contigs are ordered based on decreasing length.<br>'
+                    '    <b>- Depth values distribution:</b> distribution of depth of '
+                    'coverage values for each input (yaxis is shared with '
+                    '<br>      "Depth per position" plot in the same line).<br>'
+                    '<br>If you have any question or wish to report an '
+                    'issue, please go to proBait\'s '
+                    '<a href="https://github.com/rfm-targa/'
+                    'proBait">Github</a> repo.').format(total_baits,
+                                                        initial_baits,
+                                                        configs['Bait size'],
+                                                        configs['Bait offset'],
+                                                        iter_baits)
 
-    # add version at end
-    fig.add_annotation(dict(font=dict(size=14),
-                            showarrow=False,
-                            text='Generated with proBait v0.1.0',
-                            x=1,
-                            xanchor='right',
-                            xref='paper',
-                            y=-0.02,
-                            yanchor='bottom',
-                            yref='paper'))
+    run_summary = fig.add_annotation(x=0,
+                                     xref='paper',
+                                     y=1,
+                                     yref='paper',
+                                     text=summary_text,
+                                     showarrow=False,
+                                     font=dict(size=16),
+                                     align='left',
+                                     bordercolor='#9ecae1',
+                                     borderwidth=2,
+                                     bgcolor='#f0f0f0')
 
-    # add button to update line plots with depth of coverage per position,
-    # uncovered regions and position of generated baits
-    depth_yaxis = {'yaxis{0}.range'.format(i): [0-max_y*0.08, max_y+(max_y*0.08)] for i in range(2, len(line_tracers)*2)}
-    depth_yaxis['yaxis.range'] = [0-max_y*0.08, max_y+(max_y*0.08)]
-
-    baits_yaxis = {'yaxis{0}.range'.format(i): [0, 0.6] for i in range(3, len(line_tracers)*2, 2)}
-    baits_yaxis['yaxis.range'] = [0, 0.6]
-
-    # add option to remove yaxis
-    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.showticklabels'.format(i): False for i in range(3, len(line_tracers)*2, 2)}}
-    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.ticks'.format(i): '' for i in range(3, len(line_tracers)*2, 2)}}
-    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.zeroline'.format(i): False for i in range(3, len(line_tracers)*2, 2)}}
-    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.showline'.format(i): False for i in range(3, len(line_tracers)*2, 2)}}
-    baits_yaxis = {**baits_yaxis, **{'yaxis{0}.title'.format(i): '' for i in range(3, len(line_tracers)*2, 2)}}
-
-    buttons = [dict(label='Depth',
-                    method='update',
-                    args=[{'visible': [True, True]+[True, False, True]*len(line_tracers)},
-                          depth_yaxis]),
-               dict(label='Baits',
-                    method='update',
-                    args=[{'visible': [True, True]+[False, True, False]*len(line_tracers)},
-                          baits_yaxis])]
-
-    updatemenus = [dict(active=0, buttons=buttons, x=1, xanchor='auto', y=0.80, yanchor='auto')]
-
-    fig.update_layout(updatemenus=updatemenus)
+    fig.update_layout(title=dict(text='<b>proBait - Coverage Report</b>',
+                                 x=0,
+                                 xref='paper',
+                                 xanchor='left',
+                                 font=dict(size=30)))
 
     # line plots need fixed space
-    fig.update_layout(title='proBait - Coverage Report',
-                      height=200*len(line_tracers)+400,
-                      template='plotly_white')
-                      #paper_bgcolor='rgba(0,0,0,0)',
-                      #plot_bgcolor='rgba(0,0,0,0)')  # plotly_white, plotly_dark, presentation+ggplot2
-
-    #print(fig.layout)
+    fig.update_layout(height=height, width=1920,
+                      template='ggplot2',
+                      #paper_bgcolor='#f0f0f0')
+                      plot_bgcolor='rgba(0,0,0,0)')
 
     output_plot = os.path.join(output_dir, 'report.html')
     ru.create_html_report(fig, output_plot)
@@ -478,6 +570,8 @@ def create_report(initial_data, final_data, output_dir, short_ids,
 
 #input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
 input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/test_assemblies'
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/single_assembly'
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ref32'
 output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
 bait_size = 120
 bait_offset = 120
@@ -546,15 +640,18 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
     genomes = [os.path.join(input_files, file)
                for file in os.listdir(input_files)]
 
-    # get short identifiers
-    short_samples = gu.common_suffixes(genomes)
-
     # determine number of contigs and total length
     nr_contigs = {f: gu.count_contigs(f, minlen_contig) for f in genomes}
 
     # select assemblies with lowest number of contigs
     sorted_contigs = sorted(list(nr_contigs.items()), key=lambda x: x[1][1])
     ref_set = [t[0] for t in sorted_contigs[0:number_refs]]
+
+    genomes = ref_set + [g for g in genomes if g not in ref_set]
+    nr_contigs = {os.path.basename(f).split('.fasta')[0]: gu.count_contigs(f, minlen_contig) for f in genomes}
+
+    # get short identifiers
+    short_samples = gu.common_suffixes([os.path.basename(f).split('.fasta')[0] for f in genomes])
 
     # shred genomic sequences
     # not generating kmers that cover the end of the sequences!
@@ -629,11 +726,13 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
         # get baits positions in genomes
         baits_records = SeqIO.parse(unique_baits, 'fasta')
         baits_pos = {s: {} for s in short_samples.values()}
+        total_baits = 0
         for rec in baits_records:
             genome = (rec.id).split('_')[0]
             pos = (rec.id).split('_')[-1]
             contig = (rec.id).split('_{0}'.format(pos))[0]
             baits_pos[genome].setdefault(contig, []).append(pos)
+            total_baits += 1
 
         # create dict with config values
         configs = {'Number of inputs': len(genomes),
@@ -648,7 +747,7 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
                    'Cluster probes': str(cluster_probes),
                    'Cluster identity': cluster_identity,
                    'Cluster coverage': cluster_coverage,
-                   'Exclude regions': '{0} regions ({1}bps)'.format(len(exclude_stats), total_bps),
+                   'Exclude regions': '{0} regions'.format(len(exclude_stats)),
                    'Exclude identity': exclude_pident,
                    'Exclude coverage': exclude_coverage}
 
@@ -656,7 +755,8 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
         test_fig = create_report(coverage_info, final_info, report_dir,
                                  short_samples, ordered_contigs, fixed_xaxis,
                                  fixed_yaxis, ref_ids, nr_contigs,
-                                 configs, baits_pos)
+                                 configs, baits_pos, total_baits, nr_baits,
+                                 coverage_info[1])
 
         print('Coverage report available in {0}'.format(report_dir))
 

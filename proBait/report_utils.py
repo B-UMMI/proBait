@@ -73,7 +73,7 @@ def depth_lines(depth_values, ordered_contigs):
                 x_values.extend([start_x, stop_x])
                 y_values.extend([g[0], g[0]])
 
-            shapes[k].append([shape_start, stop_x])
+            shapes[k].append([shape_start, stop_x, p])
         # use Scattergl to deal with large datasets
         tracer = go.Scattergl(x=x_values,
                               y=y_values,
@@ -90,26 +90,33 @@ def depth_lines(depth_values, ordered_contigs):
     return [tracers, shapes]
 
 
-def create_table_tracer(header_values, cells_values, domain):
+def create_table_tracer(header_values, header_font, header_line, header_fill,
+                        cells_values, cells_font, cells_line, cells_fill,
+                        domain):
     """
     """
 
     tracer = go.Table(header=dict(values=header_values,
-                                  font=dict(size=12),
-                                  align='left'),
+                                  font=header_font,
+                                  align='left',
+                                  line=header_line,
+                                  fill=header_fill),
                       cells=dict(values=cells_values,
-                                 align='left'),
+                                 font=cells_font,
+                                 align='left',
+                                 line=cells_line,
+                                 fill=cells_fill),
                       domain=domain)
 
     return tracer
 
 
-def coverage_table(initial2_data, final2_data, short_samples, ref_ids,
-                   assemblies_lengths):
+def coverage_table(initial2_data, final2_data, short_samples,
+                   ref_ids, assemblies_lengths):
     """
     """
 
-    ids = {os.path.basename(k): v + [short_samples[k+'.fasta']]
+    ids = {k: v + [short_samples[k]]
            for k, v in assemblies_lengths.items()}
 
     samples = [v[3]+' (ref)'
@@ -148,7 +155,15 @@ def coverage_table(initial2_data, final2_data, short_samples, ref_ids,
                     initial_covered, initial_uncovered, generated_probes,
                     final_cov, final_covered, final_uncovered, mean_depth]
 
-    table_tracer = create_table_tracer(header_values, cells_values, dict(x=[0, 0.8]))
+    table_tracer = create_table_tracer(header_values,
+                                       dict(size=16),# family='Courier New'),
+                                       dict(color='#ffffff', width=2),
+                                       dict(color='#9ecae1'),
+                                       cells_values,
+                                       dict(size=14),# family='Courier New'),
+                                       dict(color='#ffffff', width=1),
+                                       dict(color='#f0f0f0'),
+                                       dict(x=[0, 1.0]))
 
     return table_tracer
 
@@ -169,16 +184,19 @@ def create_shape(xref, yref, xaxis_pos, yaxis_pos,
     return shape_tracer
 
 
-def create_subplots_fig(nr_rows, nr_cols, titles, specs, shared_yaxes=False):
+def create_subplots_fig(nr_rows, nr_cols, titles, specs,
+                        shared_yaxes, row_heights):
     """
     """
 
     fig = make_subplots(rows=nr_rows, cols=nr_cols,
                         subplot_titles=titles,
-                        horizontal_spacing=0.002,
+                        #vertical_spacing=vertical_spacing,
+                        #horizontal_spacing=horizontal_spacing,
                         shared_yaxes=shared_yaxes,
                         #column_widths=[0.9, 0.1],
-                        specs=specs)
+                        specs=specs,
+                        row_heights=row_heights)
 
     return fig
 
@@ -192,7 +210,8 @@ def create_html_report(plotly_fig, output_file, plotlyjs=True):
     """
 
     plot(plotly_fig, filename=output_file,
-         auto_open=False, include_plotlyjs=plotlyjs)
+         auto_open=False, include_plotlyjs=plotlyjs,
+         config={"displayModeBar": False, "showTips": False})
 
 
 def baits_tracer(data, ordered_contigs):
@@ -209,17 +228,39 @@ def baits_tracer(data, ordered_contigs):
             current_baits = [start+int(n) for n in data[contig[0]]]
             baits_x.extend(current_baits)
 
-            y_values = [random.uniform(0.1, 0.5) for i in range(0, len(current_baits))]
+            baits_labels.extend([str(n) for n in data[contig[0]]])
+
+            #y_values = [random.uniform(0.1, 0.5) for i in range(0, len(current_baits))]
+            y_values = [0] * len(current_baits)
             baits_y.extend(y_values)
 
             start += contig[1]
 
     tracer = go.Scattergl(x=baits_x, y=baits_y,
                           mode='markers',
-                          marker=dict(size=2, color='#3690c0'),
+                          marker=dict(size=2, color='#02818a'),
                           showlegend=False,
+                          text=baits_labels,
+                          hovertemplate=('<b>Contig pos.:<b> %{text}'
+                                         '<br><b>Cumulative pos.:<b> %{x}'),
                           # set to False so that it is not displayed as
                           # default before selecting dropdown
-                          visible=False)
+                          visible=True)
 
     return tracer
+
+
+def create_scatter(x_values, y_values, mode, hovertext):
+  """
+  """
+
+  tracer = go.Scattergl(x=x_values, y=y_values,
+                        mode=mode,
+                        #line=dict(color='black'),
+                        line=dict(color='rgba(147,112,219,0.1)'),
+                        showlegend=False,
+                        text=hovertext,
+                        hovertemplate=('%{text}'),
+                        visible=True)
+
+  return tracer
