@@ -346,17 +346,16 @@ def determine_distinct(sequences_file, unique_fasta):
     return [total, unique_seqids]
 
 
-def order_contigs(input_files):
+def order_contigs(input_files, short_ids):
     """
     """
 
     ordered_contigs = {}
     for g in input_files:
-        basename = os.path.basename(g)
         contigs = [[rec.id, str(rec.seq), len(str(rec.seq))]
                    for rec in SeqIO.parse(g, 'fasta')]
         contigs = sorted(contigs, key=lambda x: len(x[1]), reverse=True)
-        ordered_contigs[basename.split('.fasta')[0]] = [[c[0], c[2]] for c in contigs]
+        ordered_contigs[short_ids[g]] = [[c[0], c[2]] for c in contigs]
 
     return ordered_contigs
 
@@ -460,3 +459,71 @@ def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
     write_lines(baits, output_file)
 
     return len(baits)
+
+
+def get_baits_pos(baits_fasta, short_ids):
+    """
+    """
+
+    baits_records = SeqIO.parse(baits_fasta, 'fasta')
+    baits_pos = {s: {} for s in short_ids.values()}
+    for rec in baits_records:
+        genome = (rec.id).split('_')[0]
+        pos = (rec.id).split('_')[-1]
+        contig = (rec.id).split('_{0}'.format(pos))[0]
+        baits_pos[genome].setdefault(contig, []).append(pos)
+
+    return baits_pos
+
+
+def reverse_str(string):
+    """ Reverse character order in input string.
+
+        Parameters
+        ----------
+        string : str
+         String to be reversed.
+
+        Returns
+        -------
+        revstr : str
+            Reverse of input string.
+    """
+
+    revstr = string[::-1]
+
+    return revstr
+
+
+def reverse_complement(dna_sequence):
+    """ Determines the reverse complement of given DNA strand.
+
+        Parameters
+        ----------
+        dna_sequence : str
+            String representing a DNA sequence.
+
+        Returns
+        -------
+        reverse_complement_strand : str
+            The reverse complement of the DNA sequence (lowercase
+            is converted to uppercase).
+    """
+
+    base_complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A',
+                       'a': 'T', 'c': 'G', 'g': 'C', 't': 'A',
+                       'n': 'N', 'N': 'N'}
+
+    # convert string into list with each character as a separate element
+    bases = list(dna_sequence)
+
+    # determine complement strand
+    # default to 'N' if nucleotide is not in base_complement dictionary
+    bases = [base_complement.get(base, 'N') for base in bases]
+
+    complement_strand = ''.join(bases)
+
+    # reverse strand
+    reverse_complement_strand = reverse_str(complement_strand)
+
+    return reverse_complement_strand
