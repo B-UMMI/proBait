@@ -8,7 +8,6 @@
 import os
 import sys
 import argparse
-from copy import deepcopy
 
 from Bio import SeqIO
 
@@ -28,7 +27,7 @@ except:
 #output_dir = bait_creation_dir
 def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
                                bait_coverage, bait_identity, minimum_region,
-                               bait_region, nr_contigs, short_samples,
+                               nr_contigs, short_samples,
                                generate=False, depth=False):
     """
     """
@@ -43,13 +42,37 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
     contigs = gu.import_sequences(fasta_input)
     total_bases = nr_contigs[short_id][2]
 
+    # run minimap2 to map baits against input
     minimap_std = mu.run_minimap2(fasta_input, unique_baits, paf_path)
 
-    # read PAF file lines
+    # read PAF file
     paf_lines = gu.read_tabular(paf_path)
+    # PAF column headers: Query sequence name, Query sequence length,
+    # Query start coordinate (0-based), Query end coordinate (0-based),
+    # ‘+’ if query/target on the same strand; ‘-’ if opposite,
+    # Target sequence name, Target sequence length,
+    # Target start coordinate, Target end coordinate,
+    # Number of matching bases,
+    # Number bases, including gaps, in the mapping,
+    # Mapping quality (0-255 with 255 for missing),
+    # NM: Total number of mismatches and gaps in the alignment,
+    # ms: DP score of the max scoring segment in the alignment,
+    # AS: DP alignment score,
+    # nn: Number of ambiguous bases in the alignment,
+    # tp: Type of aln: P/primary, S/secondary and I,i/inversion,
+    # cm: Number of minimizers on the chain,
+    # s1: Chaining score,
+    # s2: Chaining score of the best secondary chain,
+    # de: Gap-compressed per-base sequence divergence,
+    # rl: Length of query regions harboring repetitive seeds,
+    # cg: CIGAR string (only in PAF),
+    # cs: Difference string.
+    # go to https://lh3.github.io/minimap2/minimap2.html#10
 
-    # filter out matches below bait_coverage*bait_size
-    # length includes gaps due to deletions and might span more than query length
+    # filter out secondary alignments???
+
+    # filter out alignments below bait_coverage*bait_size
+    # we use the total number of bases, including gaps
     valid_length = [line
                     for line in paf_lines
                     if int(line[10]) >= (bait_coverage*bait_size)]
@@ -59,6 +82,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
                              if int(line[10]) < (bait_coverage*bait_size)])
 
     # compute alignment identity
+    # (number of matching bases divided by total number of bases, including gaps)
     for i in range(len(valid_length)):
         valid_length[i].append(int(valid_length[i][9]) / int(valid_length[i][10]))
     
@@ -92,16 +116,24 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
 
     # get information about positions that match to determine coverage
     for i in range(len(valid_pident)):
+        # get decomposed cs string
         current = valid_pident[i][-1]
+        # get alignment start position in target
         start = int(valid_pident[i][7])
+        # determine if bait covers all positions in the alignment
+        ### Check if coverage determination for deletions and insertions is well defined
         valid_pident[i].append(mu.single_position_coverage(current, start))
 
     # identify subsequences that are well covered by baits
+    # covered regions by target sequence
     covered_intervals = {}
     for l in valid_pident:
+        # add target sequence identifier, start and stop in target and dictionary
+        # with covered positions in the target
         covered_intervals.setdefault(l[5], []).append([int(l[7]), int(l[8]), l[-1]])
 
-    # sort covered intervals
+    # sort covered intervals by start position
+    # this groups sequential and overlapping alignments
     covered_intervals_sorted = {k: sorted(v, key=lambda x: x[0])
                                 for k, v in covered_intervals.items()}
 
@@ -110,6 +142,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
     merged_intervals = {k: mu.merge_intervals(v)
                         for k, v in covered_intervals_sorted.items()}
 
+    # determine the number of positions that have depth of coverage of at least 1
     coverage = mu.determine_breadth_coverage(merged_intervals, total_bases)
 
     # determine subsequences that are not covered
@@ -131,7 +164,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
 
     # create baits for missing regions
     if generate is True:
-        missing_baits_intervals = {k: mu.cover_intervals(v, len(contigs[k]), bait_size, minimum_region, bait_region)
+        missing_baits_intervals = {k: mu.cover_intervals(v, len(contigs[k]), bait_size, minimum_region)
                                    for k, v in missing_regions.items()}
 
         # get sequences of all probes
@@ -142,9 +175,11 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
         # create fasta strings
         extra_probes = {}
         for k, v in missing_baits_intervals.items():
-            starts = [s[0] for s in v]
-            
-            extra_probes[k] = list(set(['>{0}_{1}\n{2}'.format(k, e[0], contigs[k][e[0]:e[1]]) for e in v if contigs[k][e[0]:e[1]] not in baits_seqs]))
+            # check if new baits are not equal to reverse complement of previous baits
+            extra_probes[k] = list(set(['>{0}_{1}\n{2}'.format(k, e[0], contigs[k][e[0]:e[1]])
+                                        for e in v
+                                        if contigs[k][e[0]:e[1]] not in baits_seqs
+                                        and gu.reverse_complement(contigs[k][e[0]:e[1]]) not in baits_seqs]))
 
         new_baits_lines = [v for k, v in extra_probes.items()]
         new_baits_lines = gu.flatten_list(new_baits_lines)
@@ -411,22 +446,21 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     return fig
 
 
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
 #input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/test_assemblies'
 #input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/single_assembly'
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ref32'
-output_dir = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/double_assemblies'
+output_directory = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
 bait_size = 120
 bait_offset = 120
-number_refs = 1
+number_of_refs = 1
 bait_identity = 1.0
 bait_coverage = 1.0
-bait_region = 120
 minimum_region = 120
 cluster_probes = False
-cluster_identity = 0.8
+cluster_identity = 0.85
 cluster_coverage = 0.9
-minlen_contig = 120
+minimum_sequence_length = 120
 #exclude_regions = None
 #exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
 exclude_regions = None
@@ -435,33 +469,28 @@ exclude_coverage = 0.7
 threads = 4
 fixed_xaxis = True
 fixed_yaxis = True
-contig_boundaries = 100
 report = True
 report_identities = [1.0]
 report_coverages = [1.0]
 
-# Add features to control depth of coverage of regions.
-# e.g.: duplicate coverage of regions only covered once.
-
 # determine length of subsequences with 0 coverage and etc
 # number of SNPs, deletions, insertions and etc
-
-# add option to avoid generating baits close to contigs boundaries
+# final table with number of uncovered regions per sample, number of SNPs, number of deletions, insertions, etc.
 
 # add option to determine baits from target regions and then only generate baits
 # to capture diversity in those regions in other genomes (this allows to determine baits
 # only for targeted regions and will not generate baits for other uncovered loci)
 # users can provide annotation labels for the target regions that are included in
 # the hovertext
-# important to search for options to control mmseqs2 and minimap2 memory usage
-# the process might fail because those tools use too much memory
+
 # for the step that maps against the human genome, give 1 chromossome at a time
-# possible to change info shown in table with dropdown as filters?
+
 # option to receive baits as input and add more baits generated based on input genomes
-# final table with number of uncovered regions per sample, number of SNPs, number of deletions, insertions, etc.
+
 # add boxplot with distribution of identity values for mapped baits against each genome
+
 # color baits according to feature that led to bait creation (insertion, deletion, etc)
-# detect missing regions that are close and can be included in same probe.
+
 # plot with markers representing baits should also have the following lines:
 # - Lines for the intervals of baits that were accepted (green?)
 # - Lines for intervals of baits that were not accepted (red?)
@@ -471,74 +500,55 @@ report_coverages = [1.0]
 # info somehow...). Adding these lines should not increase report file size
 # that much because each interval will only have 2 points to represent
 # accepted baits, refused baits or uncovered regions.
-
-# minimpa2 seems to return duplicated alignments, some lines in the PAF files are duplicated
-# duplicates are in FASTA file with baits. Why are there duplicates?
-# minimpa2 not finding some exact matches between baits and genomes?
-# after breaking the reference into kmers, some probes might map exactly to more than
-# one region. Minimap2 might return a perfect match for a region that is not the region
-# used to create the probe and will not return an alignment for the region used to create the probe.
-# check if probes are duplicates before adding them to the FASTA file.
-
-# what about same sequences mapping to same regions multiple times with a small offset?
-# lines would not be duplicated but it would increase depth of coverage in the same region based
-# on the same probe!
-# baits from the ref genome can overlap when mapping to other genomes/regions!
-
-# baits can map to sense or antisense. This leads to baits that map exactly to te same region but
-# on different strands. If they map well to reverse, minimpa2 detects that and we
-# consider it a covered region (check if probait is doing that!).
-def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
-         number_refs, bait_size, bait_offset, bait_identity, bait_coverage,
-         minimum_region, bait_region, cluster_probes, cluster_identity,
-         cluster_coverage, exclude_regions, exclude_pident, exclude_coverage,
-         threads, report, report_identities, report_coverages, fixed_xaxis,
+def main(input_files, output_directory, mode, minimum_sequence_length,
+         number_of_refs, bait_size, bait_offset,
+         bait_identity, bait_coverage, minimum_region,
+         cluster_probes, cluster_identity, cluster_coverage,
+         exclude_regions, exclude_pident, exclude_coverage, threads,
+         report, report_identities, report_coverages, fixed_xaxis,
          fixed_yaxis):
 
-    if os.path.isdir(output_dir) is False:
-        os.mkdir(output_dir)
-    else:
-        sys.exit('Output directory exists. Please provide a path '
-                 'for a directory that will be created to store files.')
+    # create output directory if it does not exist
+    exists = gu.create_directory(output_directory)
 
-    genomes = [os.path.join(input_files, file)
-               for file in os.listdir(input_files)]
+    # get absolute paths for all input files
+    genomes = gu.absolute_paths(input_files)
 
-    # get short identifiers
+    # attribute shorter and unique identifiers to each input
     short_samples = gu.common_suffixes(genomes)
     inv_short = {v: k for k, v in short_samples.items()}
 
-    # determine number of contigs and total length
-    nr_contigs = {short_samples[f]: gu.count_contigs(f, minlen_contig) for f in genomes}
+    # determine number of sequences and total length per input file
+    nr_contigs = {short_samples[f]: gu.count_contigs(f, minimum_sequence_length)
+                  for f in genomes}
 
-    # select assemblies with lowest number of contigs
+    # sort inputs based on number of valid sequences and select assemblies
+    # with lowest number of contigs as refs
     sorted_contigs = sorted(list(nr_contigs.items()), key=lambda x: x[1][1])
-    ref_set = [t[0] for t in sorted_contigs[0:number_refs]]
+    ref_set = [t[0] for t in sorted_contigs[0:number_of_refs]]
 
-    genomes = [inv_short[ref_set[0]]] + [g for g in genomes if short_samples[g] not in ref_set]
-    short_samples = {k: short_samples[k] for k in genomes}
-    inv_short = {v: k for k, v in short_samples.items()}
-    nr_contigs = {k: nr_contigs[k] for k in inv_short}
+    # get absolute path for sorted inputs
+    genomes = [inv_short[g[0]] for g in sorted_contigs]
 
-    # shred genomic sequences
+    # shred refs to get initial set of baits
     # not generating kmers that cover the end of the sequences!
-    baits_file = os.path.join(output_dir, 'baits.fasta')
+    baits_file = os.path.join(output_directory, 'baits.fasta')
     for g in ref_set:
         nr_baits = gu.generate_baits(inv_short[g], baits_file, bait_size,
-                                     bait_offset, minlen_contig)
+                                     bait_offset, minimum_sequence_length)
 
     print('\nCreated initial set of {0} probes based on {1} '
-          'assemblies.'.format(nr_baits, number_refs))
+          'inputs.'.format(nr_baits, number_of_refs))
 
     # identify unique baits
-    unique_baits = os.path.join(output_dir, 'unique_baits.fasta')
+    unique_baits = os.path.join(output_directory, 'unique_baits.fasta')
     total, unique_seqids = gu.determine_distinct(baits_file, unique_baits)
     print('Removed {0} repeated probes.\n'.format(total))
 
     # start mapping baits against remaining genomes
     # mapping against ref_set to cover missing regions
-    bait_creation_dir = os.path.join(output_dir, 'incremental_bait_creation')
-    os.mkdir(bait_creation_dir)
+    bait_creation_dir = os.path.join(output_directory, 'incremental_bait_creation')
+    exists = gu.create_directory(bait_creation_dir)
 
     total = 0
     coverage_info = {}
@@ -549,7 +559,7 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
         generated = incremental_bait_generator(g, unique_baits,
                                                bait_creation_dir, bait_size,
                                                bait_coverage, bait_identity,
-                                               minimum_region, bait_region,
+                                               minimum_region,
                                                nr_contigs, short_samples,
                                                generate=True, depth=False)
         coverage_info[short_samples[g]] = generated[0]
@@ -565,26 +575,33 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
                                   nr_baits+total))
 
     if cluster_probes is True:
-        clustering_dir = os.path.join(output_dir, 'clustering')
-        os.mkdir(clustering_dir)
-        unique_baits, removed = cu.exclude_similar_probes(unique_baits, clustering_dir,
-                                                          cluster_identity, cluster_coverage,
-                                                          bait_size, threads)
+        clustering_dir = os.path.join(output_directory, 'clustering')
+        exists = gu.create_directory(clustering_dir)
+        unique_baits, removed = exclude_similar_probes(unique_baits,
+                                                       clustering_dir,
+                                                       cluster_identity,
+                                                       cluster_coverage,
+                                                       bait_size,
+                                                       threads)
 
     exclude_stats = 'None'
     if exclude_regions is not None:
-        exclude_dir = os.path.join(output_dir, 'exclude')
+        exclude_dir = os.path.join(output_directory, 'exclude')
         os.mkdir(exclude_dir)
-        unique_baits, removed = exclude_contaminant(unique_baits, exclude_regions,
-                                                    exclude_pident, exclude_coverage,
-                                                    bait_size, exclude_dir)
+        unique_baits, removed = exclude_contaminant(unique_baits,
+                                                    exclude_regions,
+                                                    exclude_pident,
+                                                    exclude_coverage,
+                                                    bait_size,
+                                                    exclude_dir)
         # determine number of exclude regions and total bps
-        exclude_stats = [len(rec) for rec in SeqIO.parse(exclude_regions, 'fasta')]
+        exclude_stats = [len(rec)
+                         for rec in SeqIO.parse(exclude_regions, 'fasta')]
         exclude_stats = len(exclude_stats)
 
     if report is True:
         # create report directory
-        report_dir = os.path.join(output_dir, 'report_data')
+        report_dir = os.path.join(output_directory, 'report_data')
         os.mkdir(report_dir)
 
         # determine contig order from longest to shortest
@@ -592,14 +609,12 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
 
         # create dict with config values
         configs = {'Number of inputs': len(genomes),
-                   'Minimum contig length': minlen_contig,
-                   'Contig boundaries distance': contig_boundaries,
-                   'Number of references': number_refs,
+                   'Minimum sequence length': minimum_sequence_length,
+                   'Number of references': number_of_refs,
                    'Bait size': bait_size,
                    'Bait offset': bait_offset,
                    'Bait identity': bait_identity,
                    'Bait coverage': bait_coverage,
-                   'Bait region': bait_region,
                    'Cluster probes': str(cluster_probes),
                    'Cluster identity': cluster_identity,
                    'Cluster coverage': cluster_coverage,
@@ -618,7 +633,7 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
             configs['Report bait coverage'] = report_coverages[i]
             # determine breadth of coverage for all assemblies
             # and depth of coverage for each base
-            final_coverage_dir = os.path.join(output_dir, 'final_coverage_{0}'.format(i))
+            final_coverage_dir = os.path.join(output_directory, 'final_coverage_{0}'.format(i))
             os.mkdir(final_coverage_dir)
 
             final_info = {}
@@ -629,7 +644,7 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
                 generated = incremental_bait_generator(g, unique_baits,
                                                        final_coverage_dir,
                                                        bait_size, report_coverages[i],
-                                                       v, minimum_region, bait_region,
+                                                       v, minimum_region,
                                                        nr_contigs, short_samples,
                                                        generate=False, depth=True)
                 final_info[short_samples[g]] = generated[0]
@@ -643,7 +658,7 @@ def main(input_files, output_dir, mode, minlen_contig, contig_boundaries,
                       end='')
 
             # save depth values
-            depth_files_dir = os.path.join(output_dir, 'depth_files_idnt{0}_cov{1}'.format(str(v).replace('.', ''),
+            depth_files_dir = os.path.join(output_directory, 'depth_files_idnt{0}_cov{1}'.format(str(v).replace('.', ''),
                                                                                            str(report_coverages[i]).replace('.', '')))
             os.mkdir(depth_files_dir)
             depth_files = [mu.write_depth(k, v[3], depth_files_dir) for k, v in final_info.items()]
@@ -663,60 +678,55 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
 
-    parser.add_argument('-i', type=str, required=True,
-                        dest='input_files',
+    parser.add_argument('-i', '--input-files', type=str,
+                        required=True, dest='input_files',
                         help='Path to the directory with '
                              'input FASTA files.')
 
-    parser.add_argument('-o', type=str, required=True,
-                        dest='output_dir',
+    parser.add_argument('-o', '--output-directory', type=str,
+                        required=True, dest='output_directory',
                         help='Path to the output directory where '
                              'files will be saved to (must not exist, '
                              'process will create this directory).')
 
-    parser.add_argument('--m', type=str, required=False,
+    parser.add_argument('-m', '--mode', type=str, required=False,
                         choices=['inclusive', 'exclusive'],
                         default='inclusive',
                         dest='mode',
                         help='')
 
-    parser.add_argument('--mc', type=int, required=False,
-                        default=360,
-                        dest='minlen_contig',
-                        help='Minimum contig length. Probes will '
-                             'not be created for contigs with a '
+    parser.add_argument('-mcl', '--minimum-sequence-length', type=int,
+                        required=False, default=0,
+                        dest='minimum_sequence_length',
+                        help='Minimum sequence length. Probes will '
+                             'not be created for sequences with a '
                              'length value that is smaller than '
                              'this value.')
 
-    parser.add_argument('--cb', type=int, required=False,
-                        default=0,
-                        dest='contig_boundaries',
-                        help='Distance to contig boundaries. '
-                             'Baits will be determined for uncovered '
-                             'regions that are at least this value of '
-                             'bases from one of the contig boundaries.')
-
-    parser.add_argument('--nr', type=int, required=False,
-                        default=1,
-                        dest='number_refs',
+    parser.add_argument('-rf', '--refs', type=str,
+                        required=True, default=1,
+                        dest='refs',
                         help='Number of genome assemblies that will '
                              'be selected to create the initial set '
                              'of probes (the process selects the '
                              'assemblies with least contigs).')
 
-    parser.add_argument('--bs', type=int, required=False,
+    parser.add_argument('-bs', '--bait-size', type=int,
+                        required=False,
                         default=120,
                         dest='bait_size',
                         help='Length of the probes that the process '
                              'will create.')
 
-    parser.add_argument('--bo', type=int, required=False,
+    parser.add_argument('-bo', '--bait-offset', type=int,
+                        required=False,
                         default=120,
                         dest='bait_offset',
                         help='Start position offset between consecutive '
                              'probes.')
 
-    parser.add_argument('--bi', type=float, required=False,
+    parser.add_argument('-bi', '--bait-identity', type=float,
+                        required=False,
                         default=1.0,
                         dest='bait_identity',
                         help='Minimum percent identity that '
@@ -727,7 +737,8 @@ def parse_arguments():
                              'that cover well regions of input '
                              'genomes).')
 
-    parser.add_argument('--bc', type=float, required=False,
+    parser.add_argument('-bc', '--bait-coverage', type=float,
+                        required=False,
                         default=1.0,
                         dest='bait_coverage',
                         help='Minimum percent length of the '
@@ -737,7 +748,8 @@ def parse_arguments():
                              'of probes that cover well regions of '
                              'input genomes).')
 
-    parser.add_argument('--mr', type=int, required=False,
+    parser.add_argument('-mr', '--minimum-region', type=int,
+                        required=False,
                         default=0,
                         dest='minimum_region',
                         help='Uncovered regions must have a length '
@@ -745,13 +757,9 @@ def parse_arguments():
                              'If the uncovered region is smaller than '
                              'this value the process will not generate '
                              'new baits to cover that region.')
-    
-    parser.add_argument('--br', type=int, required=False,
-                        default=0,
-                        dest='bait_region',
-                        help='')
 
-    parser.add_argument('--c', required=False, action='store_true',
+    parser.add_argument('-c', '--cluster-probes', required=False,
+                        action='store_true',
                         dest='cluster_probes',
                         help='Cluster set of probes after generating '
                              'probes to cover all input assemblies. '
@@ -760,60 +768,71 @@ def parse_arguments():
                              'probes based on percent identity and '
                              'coverage.')
 
-    parser.add_argument('--ci', type=float, required=False,
+    parser.add_argument('-ci', '--cluster-identity', type=float,
+                        required=False,
                         default=1.0,
                         dest='cluster_identity',
                         help='Clustered probes with equal or higher '
                              'percent identity are excluded.')
 
-    parser.add_argument('--cc', type=float, required=False,
+    parser.add_argument('-cc', '--cluster-coverage', type=float,
+                        required=False,
                         default=1.0,
                         dest='cluster_coverage',
                         help='Clustered probes with equal or higher '
                              'coverage may be excluded based on '
                              'percent identity.')
 
-    parser.add_argument('--e', type=str, required=False,
+    parser.add_argument('-e', '--exclude-regions', type=str,
+                        required=False,
                         default=None,
                         dest='exclude_regions',
                         help='Path to a FASTA file with genomic regions '
                              'that probes must not cover.')
 
-    parser.add_argument('--ep', type=float, required=False,
+    parser.add_argument('-ep', '--exclude-pident', type=float,
+                        required=False,
                         default=0.8,
                         dest='exclude_pident',
                         help='Probes with percent identity equal or '
                              'higher than this value to regions that '
                              'must not be covered will be excluded.')
 
-    parser.add_argument('--ec', type=float, required=False,
+    parser.add_argument('-ec', '--exclude-coverage', type=float,
+                        required=False,
                         default=0.5,
                         dest='exclude_coverage',
                         help='Probes that map against the regions to '
                              'exclude with equal or greater coverage '
                              'may be excluded based on percent identity.')
 
-    parser.add_argument('--t', type=int, required=False,
+    parser.add_argument('-t', '--threads', type=int,
+                        required=False,
                         default=1, dest='threads',
                         help='')
 
-    parser.add_argument('--report', required=False, action='store_true',
+    parser.add_argument('-r', '--report', required=False,
+                        action='store_true',
                         dest='report',
                         help='')
 
-    parser.add_argument('--ri', nargs='+', required=False,
+    parser.add_argument('-ri', '--report-identities', type=float, nargs='+',
+                        required=False,
                         dest='report_identities',
                         help='')
 
-    parser.add_argument('--rc', nargs='+', required=False,
+    parser.add_argument('-rc', '--report-coverages', type=float, nargs='+',
+                        required=False,
                         dest='report_coverages',
                         help='')
 
-    parser.add_argument('--fx', required=False, action='store_true',
+    parser.add_argument('-fx', '--fixed-xaxis', required=False,
+                        action='store_true',
                         dest='fixed_xaxis',
                         help='')
 
-    parser.add_argument('--fy', required=False, action='store_true',
+    parser.add_argument('-fy', '--fixed-yaxis', required=False,
+                        action='store_true',
                         dest='fixed_yaxis',
                         help='')
 

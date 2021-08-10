@@ -16,6 +16,28 @@ import itertools
 from Bio import SeqIO
 
 
+def create_directory(directory_path):
+    """
+    """
+
+    if os.path.isdir(directory_path) is False:
+        os.mkdir(directory_path)
+    else:
+        print('Directory exists.')
+
+    return os.path.isdir(directory_path)
+
+
+def absolute_paths(directory_path):
+    """
+    """
+
+    file_paths = [os.path.join(directory_path, file)
+                  for file in os.listdir(directory_path)]
+
+    return file_paths
+
+
 def pickle_dumper(content, output_file):
     """ Use the Pickle module to serialize an object.
 
@@ -325,12 +347,18 @@ def determine_distinct(sequences_file, unique_fasta):
             seqid = record.id
             seq_hash = hash_sequence(sequence)
 
+            # determine reverse complement
+            revseq = reverse_complement(sequence)
+            revseq_hash = hash_sequence(revseq)
+
             # store only the hash for distinct sequences
-            if seq_hash not in seqs_dict:
+            if seq_hash not in seqs_dict and revseq_hash not in seqs_dict:
                 seqs_dict[seq_hash] = seqid
                 recout = fasta_str_record(seqid, sequence)
                 out_seqs.append(recout)
-            elif seq_hash in seqs_dict:
+                # add reverse complement hash
+                seqs_dict[revseq_hash] = seqid
+            elif seq_hash in seqs_dict or revseq_hash in seqs_dict:
                 total += 1
         else:
             exausted = True
@@ -392,9 +420,16 @@ def common_suffixes(strings):
     """
     """
 
+    # simply split based on '.' and return first field for single input
+    if len(strings) == 1:
+        return {strings[0]: os.path.basename(strings[0]).split('.')[0]}
+
+    # split based on '.' and determine common terms
     splitted = [os.path.basename(s).split('.') for s in strings]
     common = set(splitted[0]).intersection(*splitted[1:])
+    # remove common terms
     filtered = [[e for e in s if e not in common] for s in splitted]
+    # join remaining terms to create shorter and unique identifiers
     joined = {strings[i]: '.'.join(filtered[i]) for i in range(len(filtered))}
 
     return joined

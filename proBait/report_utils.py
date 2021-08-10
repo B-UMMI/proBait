@@ -355,7 +355,10 @@ def add_plots_traces(traces, row, col, top_x, top_y, plotly_fig):
 
   # adjust axis range
   plotly_fig.update_xaxes(range=[-0.2, top_x], row=row, col=col)
-  y_tickvals = list(range(0, top_y, int(top_y/4))) + [top_y]
+  y_step = int(top_y/4) if int(top_y/4) > 0 else 1
+  y_tickvals = list(range(0, top_y, y_step))
+  if top_y not in y_tickvals:
+    y_tickvals += [top_y]
   plotly_fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], tickvals=y_tickvals, row=row, col=col)
   plotly_fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=row, col=col+1)
 
@@ -381,7 +384,10 @@ def create_shapes(shapes_data, y_value, ref_axis):
           # create invisible scatter to add hovertext
           hovertext = [s[2], shapes_data[i+1][2]]
           hover_str = '<b><--{0}<b><br><b>{1}--><b>'.format(*hovertext)
-          hidden_ticks = list(range(1, y_value, int(y_value/4)))+[y_value]
+          y_step = int(y_value/4) if int(y_value/4) > 0 else 1
+          hidden_ticks = list(range(1, y_value, y_step))
+          if y_value not in hidden_ticks:
+              hidden_ticks += [y_value]
           hidden_tracer = create_scatter([s[1]]*len(hidden_ticks),
                                             hidden_ticks,
                                             mode='lines',

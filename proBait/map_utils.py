@@ -42,7 +42,8 @@ def run_minimap2(reference, map_fasta, output_file):
     """
 
     # -I parameter to control number of target bases loaded into memory
-    minimap_args = ['minimap2 -I 100M --cs -cx sr {0} {1} > '
+    # --secondary=yes to output secondary alignments that might have high score
+    minimap_args = ['minimap2 -I 100M --cs -cx sr --secondary=yes {0} {1} > '
                     '{2}'.format(reference, map_fasta, output_file)]
 
     minimap_proc = subprocess.Popen(minimap_args,
@@ -237,7 +238,7 @@ def determine_small_bait(span, bait_size, start, stop, sequence_length):
     return bait_interval
 
 
-def determine_interval_baits(bait_size, start, stop, bait_region):
+def determine_interval_baits(bait_size, start, stop):
     """ Determines baits for regions with length value
         equal or greater than bait size.
 
@@ -267,12 +268,10 @@ def determine_interval_baits(bait_size, start, stop, bait_region):
             bait_interval = [start, stop]
             reach = True
         elif (start + bait_size) > stop:
-            # do not determine last bait if it
-            # extends beyond stop position
-            if bait_region <= (stop-start):
-                diff = (start + bait_size) - stop
-                bot_plus = start - diff
-                bait_interval = [bot_plus, stop]
+            # modify to try to center baits
+            diff = (start + bait_size) - stop
+            bot_plus = start - diff
+            bait_interval = [bot_plus, stop]
             reach = True
         else:
             bait_interval = [start, start + bait_size]
@@ -358,6 +357,7 @@ def determine_missing_intervals(intervals, identifier, total_len):
     not_covered = 0
     missing_regions = {identifier: []}
     for i in intervals:
+        # determine if there is a coverage gap between previous and current interval
         diff = i[0] - start
         if diff > 0:
             missing_regions[identifier].append([start, start+diff])
@@ -383,7 +383,7 @@ def determine_missing_intervals(intervals, identifier, total_len):
 
 
 def cover_intervals(intervals, total_len, bait_size,
-                    minimum_region, bait_region):
+                    minimum_region):
     """ Determines baits to cover specified sequence regions.
 
         Parameters
@@ -413,7 +413,7 @@ def cover_intervals(intervals, total_len, bait_size,
         # check if uncovered region is equal or greater than
         # minimum length value defined for uncovered regions
         if span >= minimum_region:
-            if span < bait_size and span >= bait_region:
+            if span < bait_size:
                 bait_interval = determine_small_bait(span, bait_size,
                                                      i[0], i[1],
                                                      total_len)
@@ -421,9 +421,8 @@ def cover_intervals(intervals, total_len, bait_size,
             # will slide and determine baits
             # if in the last iter, uncovered region is very small it will overlap
             # with regions that are already covered and increase depth of coverage
-            # pass bait_region as arg to stop determining when region is too small?
             elif span >= bait_size:
-                probes = determine_interval_baits(bait_size, i[0], i[1], bait_region)
+                probes = determine_interval_baits(bait_size, i[0], i[1])
                 cover_baits.extend(probes)
 
     return cover_baits
