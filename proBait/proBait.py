@@ -6,7 +6,7 @@
 
 
 import os
-import sys
+import csv
 import argparse
 
 from Bio import SeqIO
@@ -23,11 +23,11 @@ except:
     import proBait.general_utils as gu
 
 
-#fasta_input = genomes[0]
+#fasta_input = genomes[1]
 #output_dir = bait_creation_dir
 def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
                                bait_coverage, bait_identity, minimum_region,
-                               nr_contigs, short_samples,
+                               nr_contigs, short_samples, minimum_exact_match,
                                generate=False, depth=False):
     """
     """
@@ -46,6 +46,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
     minimap_std = mu.run_minimap2(fasta_input, unique_baits, paf_path)
 
     # read PAF file
+    # PAF file has variabe number of fields, only the first 12 fields are always present
     paf_lines = gu.read_tabular(paf_path)
     # PAF column headers: Query sequence name, Query sequence length,
     # Query start coordinate (0-based), Query end coordinate (0-based),
@@ -104,6 +105,18 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
     for i in range(len(invalid_mappings)):
         current = invalid_mappings[i][-2]
         invalid_mappings[i].append(gu.regex_matcher(current, pattern))
+
+    # filter out alignments that do not have at least N sequential matching bases
+    valid_stretch = {i: l[-1] for i, l in enumerate(valid_pident)}
+    valid_stretch = {i: [e for e in l if e.startswith(':')] for i, l in valid_stretch.items()}
+    valid_stretch = {i: [int(e.lstrip(':')) for e in l] for i, l in valid_stretch.items()}
+    valid_stretch = {i: sorted(l, reverse=True) for i, l in valid_stretch.items()}
+
+    invalid_cases = [i for i, l in valid_stretch.items() if l[0] < minimum_exact_match]
+    invalid_mappings.extend([valid_pident[i] for i in invalid_cases])
+
+    valid_cases = [i for i, l in valid_stretch.items() if l[0] >= minimum_exact_match]
+    valid_pident = [valid_pident[i] for i in valid_cases]
 
     # get info that matters from discarded baits
     discarded = {}
@@ -169,8 +182,6 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
 
         # get sequences of all probes
         baits_seqs = [str(rec.seq) for rec in SeqIO.parse(unique_baits, 'fasta')]
-        #baits_reverse = [gu.reverse_complement(seq) for seq in baits_seqs]
-        #baits_seqs.extend(baits_reverse)
 
         # create fasta strings
         extra_probes = {}
@@ -184,7 +195,9 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
         new_baits_lines = [v for k, v in extra_probes.items()]
         new_baits_lines = gu.flatten_list(new_baits_lines)
 
-        gu.write_lines(new_baits_lines, unique_baits)
+        # avoid adding newline if there are no baits
+        if len(new_baits_lines) > 0:
+            gu.write_lines(new_baits_lines, unique_baits)
 
         coverage_info.append(len(new_baits_lines))
         total += len(new_baits_lines)
@@ -301,7 +314,6 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
     return [final_baits, multispecific_probes]
 
 
-############## Baits positions are wrong! (offset of -1 in each position?)
 #initial_data = coverage_info
 #final_data = final_info
 #short_ids = short_samples
@@ -312,7 +324,7 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
 def create_report(initial_data, final_data, output_dir, short_ids,
                   ordered_contigs, fixed_xaxis, fixed_yaxis, ref_set,
                   nr_contigs, configs, baits_pos, total_baits,
-                  initial_baits, iter_baits):
+                  initial_baits, iter_baits, missing_files):
     """
     """
 
@@ -339,7 +351,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
                                           dict(x=[0.5, 1.0], y=[0.2, 1.0]))
 
     table_tracer = ru.coverage_table(initial_data, final_data,
-                                     short_ids, ref_set, nr_contigs)
+                                     ref_set, nr_contigs)
 
     # depth of coverage values distribution
     hist_tracers = ru.depth_hists({k: v[4] for k, v in final_data.items()})
@@ -347,7 +359,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     # depth of coverage per position
     line_tracers, shapes = ru.depth_lines({k: v[3]
                                            for k, v in final_data.items()},
-                                          ordered_contigs)
+                                          ordered_contigs, missing_files)
 
     # baits start position per input
     baits_tracers = {k: ru.baits_tracer(baits_pos[k], v)
@@ -382,7 +394,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     for k, v in line_tracers.items():
         top_x = nr_contigs[k] if max_x is None else max_x
         top_y = coverage_values[k] if max_y is None else max_y
-        traces = [v[0], baits_tracers[k], hist_tracers[k]]
+        traces = [v, baits_tracers[k], hist_tracers[k]]
         fig = ru.add_plots_traces(traces, r, 1, top_x, top_y, fig)
         r += 1
 
@@ -453,10 +465,11 @@ input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/double_ass
 output_directory = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
 bait_size = 120
 bait_offset = 120
-number_of_refs = 1
-bait_identity = 1.0
-bait_coverage = 1.0
+refs = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/refs.txt'
+bait_identity = 0.8
+bait_coverage = 0.9
 minimum_region = 120
+minimum_exact_match = 30
 cluster_probes = False
 cluster_identity = 0.85
 cluster_coverage = 0.9
@@ -470,8 +483,8 @@ threads = 4
 fixed_xaxis = True
 fixed_yaxis = True
 report = True
-report_identities = [1.0]
-report_coverages = [1.0]
+report_identities = [0.8]
+report_coverages = [0.9]
 
 # determine length of subsequences with 0 coverage and etc
 # number of SNPs, deletions, insertions and etc
@@ -500,9 +513,11 @@ report_coverages = [1.0]
 # info somehow...). Adding these lines should not increase report file size
 # that much because each interval will only have 2 points to represent
 # accepted baits, refused baits or uncovered regions.
+
+# add option to only accept alignments that have at least N consecutive matching bases?
 def main(input_files, output_directory, mode, minimum_sequence_length,
-         number_of_refs, bait_size, bait_offset,
-         bait_identity, bait_coverage, minimum_region,
+         refs, bait_size, bait_offset,
+         bait_identity, bait_coverage, minimum_region, minimum_exact_match,
          cluster_probes, cluster_identity, cluster_coverage,
          exclude_regions, exclude_pident, exclude_coverage, threads,
          report, report_identities, report_coverages, fixed_xaxis,
@@ -514,21 +529,23 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
     # get absolute paths for all input files
     genomes = gu.absolute_paths(input_files)
 
+    # read file with references basenames
+    with open(refs, 'r') as infile:
+        ref_set = [g[0] for g in list(csv.reader(infile, delimiter='\t'))]
+        ref_set = [os.path.join(input_files, g) for g in ref_set]
+
+    # reorder genome list
+    genomes = ref_set + [g for g in genomes if g not in ref_set]
+
     # attribute shorter and unique identifiers to each input
     short_samples = gu.common_suffixes(genomes)
     inv_short = {v: k for k, v in short_samples.items()}
 
+    ref_set = [short_samples[g] for g in ref_set]
+
     # determine number of sequences and total length per input file
     nr_contigs = {short_samples[f]: gu.count_contigs(f, minimum_sequence_length)
                   for f in genomes}
-
-    # sort inputs based on number of valid sequences and select assemblies
-    # with lowest number of contigs as refs
-    sorted_contigs = sorted(list(nr_contigs.items()), key=lambda x: x[1][1])
-    ref_set = [t[0] for t in sorted_contigs[0:number_of_refs]]
-
-    # get absolute path for sorted inputs
-    genomes = [inv_short[g[0]] for g in sorted_contigs]
 
     # shred refs to get initial set of baits
     # not generating kmers that cover the end of the sequences!
@@ -538,7 +555,7 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
                                      bait_offset, minimum_sequence_length)
 
     print('\nCreated initial set of {0} probes based on {1} '
-          'inputs.'.format(nr_baits, number_of_refs))
+          'inputs.'.format(nr_baits, len(ref_set)))
 
     # identify unique baits
     unique_baits = os.path.join(output_directory, 'unique_baits.fasta')
@@ -561,6 +578,7 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
                                                bait_coverage, bait_identity,
                                                minimum_region,
                                                nr_contigs, short_samples,
+                                               minimum_exact_match,
                                                generate=True, depth=False)
         coverage_info[short_samples[g]] = generated[0]
         discarded_baits_files.append(generated[2])
@@ -587,7 +605,7 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
     exclude_stats = 'None'
     if exclude_regions is not None:
         exclude_dir = os.path.join(output_directory, 'exclude')
-        os.mkdir(exclude_dir)
+        exists = gu.create_directory(exclude_dir)
         unique_baits, removed = exclude_contaminant(unique_baits,
                                                     exclude_regions,
                                                     exclude_pident,
@@ -602,7 +620,7 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
     if report is True:
         # create report directory
         report_dir = os.path.join(output_directory, 'report_data')
-        os.mkdir(report_dir)
+        exists = gu.create_directory(report_dir)
 
         # determine contig order from longest to shortest
         ordered_contigs = gu.order_contigs(genomes, short_samples)
@@ -610,7 +628,7 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
         # create dict with config values
         configs = {'Number of inputs': len(genomes),
                    'Minimum sequence length': minimum_sequence_length,
-                   'Number of references': number_of_refs,
+                   'Number of references': len(ref_set),
                    'Bait size': bait_size,
                    'Bait offset': bait_offset,
                    'Bait identity': bait_identity,
@@ -634,11 +652,11 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
             # determine breadth of coverage for all assemblies
             # and depth of coverage for each base
             final_coverage_dir = os.path.join(output_directory, 'final_coverage_{0}'.format(i))
-            os.mkdir(final_coverage_dir)
+            exists = gu.create_directory(final_coverage_dir)
 
             final_info = {}
             discarded_baits_files = []
-            missing_files = []
+            #missing_files = []
             processed = 0
             for g in genomes:
                 generated = incremental_bait_generator(g, unique_baits,
@@ -646,10 +664,11 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
                                                        bait_size, report_coverages[i],
                                                        v, minimum_region,
                                                        nr_contigs, short_samples,
+                                                       minimum_exact_match,
                                                        generate=False, depth=True)
                 final_info[short_samples[g]] = generated[0]
                 discarded_baits_files.append(generated[2])
-                missing_files.append(generated[3])
+                #missing_files.append(generated[3])
                 processed += 1
                 print('\r', 'Evaluated coverage for {0}/{1} '
                       'inputs with bait_identity={2} and '
@@ -660,14 +679,14 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
             # save depth values
             depth_files_dir = os.path.join(output_directory, 'depth_files_idnt{0}_cov{1}'.format(str(v).replace('.', ''),
                                                                                            str(report_coverages[i]).replace('.', '')))
-            os.mkdir(depth_files_dir)
+            exists = gu.create_directory(depth_files_dir)
             depth_files = [mu.write_depth(k, v[3], depth_files_dir) for k, v in final_info.items()]
 
             test_fig = create_report(coverage_info, final_info, report_dir,
                                      short_samples, ordered_contigs, fixed_xaxis,
                                      fixed_yaxis, ref_set, nr_contigs,
                                      configs, baits_pos, nr_baits+total, nr_baits,
-                                     total)
+                                     total, missing_files)
 
             print('\nCoverage report for bait_identity={0} and '
                   'bait_coverage={1} available in {2}'.format(v, report_coverages[i], report_dir))
@@ -704,12 +723,11 @@ def parse_arguments():
                              'this value.')
 
     parser.add_argument('-rf', '--refs', type=str,
-                        required=True, default=1,
+                        required=True,
                         dest='refs',
-                        help='Number of genome assemblies that will '
-                             'be selected to create the initial set '
-                             'of probes (the process selects the '
-                             'assemblies with least contigs).')
+                        help='Path to file with the basename of files '
+                             'that will be used as references to create '
+                             'the initial set of probes.')
 
     parser.add_argument('-bs', '--bait-size', type=int,
                         required=False,
@@ -757,6 +775,15 @@ def parse_arguments():
                              'If the uncovered region is smaller than '
                              'this value the process will not generate '
                              'new baits to cover that region.')
+
+    parser.add_argument('-me', '--minimum-exact-match', type=int,
+                        required=False,
+                        default=0,
+                        dest='minimum_exact_match',
+                        help='Minimum number of N sequential matching '
+                             'bases. Alignments are only accepted if they '
+                             'have at least N sequential matching bases '
+                             'with an input.')
 
     parser.add_argument('-c', '--cluster-probes', required=False,
                         action='store_true',

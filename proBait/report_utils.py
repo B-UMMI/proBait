@@ -7,6 +7,7 @@
 
 import os
 import math
+import pickle
 import random
 from itertools import groupby
 
@@ -35,38 +36,102 @@ def depth_hists(depth_values):
     return tracers
 
 
-def depth_lines(depth_values, ordered_contigs):
+def depth_lines(depth_values, ordered_contigs, missing_files):
     """
     """
 
-    tracers = {}
     shapes = {}
+    tracers = {}
     for k, v in depth_values.items():
-        x_values = []
-        y_values = []
-        hovertext = []
-        # start genome at xaxis=1 in plot
-        cumulative_pos = 1
+        # get uncovered intervals in the first iteration
+        uncovered_file = [f for f in missing_files if k in f][0]
+        with open(uncovered_file, 'rb') as infile:
+            miss_regions = pickle.load(infile)
+
+        # order contigs based on decreasing length
         contig_order = {}
-        shapes[k] = []
-        tracers[k] = []
         for e in ordered_contigs[k]:
             if e[0] in v:
                 contig_order[e[0]] = v[e[0]]
             else:
                 contig_order[e[0]] = [{i: 0 for i in range(e[1])}]
 
+        x_values = []
+        y_values = []
+        hovertext = []
+        shapes[k] = []
+        tracers[k] = []
+        # results have 0-based coordinates
+        # but plots will be 1-based
+        cumulative_pos = 1
         for p, c in contig_order.items():
+            # get missing intervals for contig
+            miss = miss_regions[p]
+            # switch to 1-based coordinates for contigs
             contig_pos = 1
+            # create line tracers for missing intervals in first iteration
+            # coordinates are 0-based and need to be incremented to
+            # get 1-based coordinates
+            # create 2 tracers, one for the start coordinates and
+            # another for the stop coordinates
+            starts = []
+            starts_hovertext = []
+            stops = []
+            stops_hovertext = []
+            for m in miss:
+                # cumulative position already includes +1
+                starts.append(cumulative_pos+m[0])
+                # add +1 to start to get 1-based coordinates
+                starts_hovertext.append(str(m[0]+1))
+                stops.append(cumulative_pos+m[1]-1)
+                stops_hovertext.append(str(m[1]))
+
+            # create tracers
+            tracer_starts = go.Scattergl(x=starts,
+                                         y=[0.2]*len(starts),
+                                         # add +1 to start to get 1-based coordinates
+                                         text=starts_hovertext,
+                                         hovertemplate=('<b>Contig pos.:<b> %{text}'
+                                                        '<br><b>Cumulative pos.:<b> %{x}'),
+                                         showlegend=False,
+                                         mode='markers',
+                                         marker=dict(color='#252525', size=5, symbol='arrow-right'))
+
+            tracer_stops = go.Scattergl(x=stops,
+                                        y=[0.2]*len(stops),
+                                        # add +1 to start to get 1-based coordinates
+                                        text=stops_hovertext,
+                                        hovertemplate=('<b>Contig pos.:<b> %{text}'
+                                                       '<br><b>Cumulative pos.:<b> %{x}'),
+                                        showlegend=False,
+                                        mode='markers',
+                                        marker=dict(color='#252525', size=5, symbol='arrow-left'))
+
+            tracers[k].extend([tracer_starts, tracer_stops])
+                # tracer_miss = go.Scattergl(x=[(cumulative_pos)+m[0], (cumulative_pos)+m[1]-1],
+                #                            y=[0, 0],
+                #                            # add +1 to start to get 1-based coordinates
+                #                            text=[str(m[0]+1), str(m[1])],
+                #                            hovertemplate=('<b>Contig pos.:<b> %{text}'
+                #                                           '<br><b>Cumulative pos.:<b> %{x}'),
+                #                            showlegend=False,
+                #                            mode='lines',
+                #                            line=dict(color='#252525', width=1))
+                # tracers[k].append(tracer_miss)
+
+            # group depth values into groups of equal sequential values
             values_groups = [list(j) for i, j in groupby(c[0].values())]
             shape_start = cumulative_pos
             for g in values_groups:
+                # cumulative and contig values already include +1
+                # subtract 1 from total sequence length
                 hovertext.append(contig_pos)
                 hovertext.append(contig_pos + (len(g) - 1))
 
                 start_x = cumulative_pos
                 stop_x = start_x + (len(g) - 1)
 
+                # add full length to get start position of next contig
                 cumulative_pos += len(g)
                 contig_pos += len(g)
 
@@ -83,8 +148,8 @@ def depth_lines(depth_values, ordered_contigs):
                                              '<br><b>Coverage:<b> %{y}'),
                               showlegend=False,
                               mode='lines',
-                              line=dict(color='#3690c0', width=0.5),
-                              fill='tozeroy')
+                              line=dict(color='#3690c0', width=0.5))#,
+                              #fill='tozeroy')
         tracers[k].append(tracer)
 
     return [tracers, shapes]
@@ -111,7 +176,7 @@ def create_table_tracer(header_values, header_font, header_line, header_fill,
     return tracer
 
 # initial data keys are full paths but it expects basenames!!!
-def coverage_table(initial2_data, final2_data, short_samples,
+def coverage_table(initial2_data, final2_data,
                    ref_ids, nr_contigs):
     """
     """
@@ -219,23 +284,23 @@ def baits_tracer(data, ordered_contigs):
     baits_x = []
     baits_y = []
     baits_labels = []
-    start = 0
+    start = 1
     for contig in ordered_contigs:
         if contig[0] in data:
+            # cumulative coordinates
             current_baits = [start+int(n) for n in data[contig[0]]]
             baits_x.extend(current_baits)
+            # contig coordinates
+            baits_labels.extend([str(int(n)+1) for n in data[contig[0]]])
 
-            baits_labels.extend([str(n) for n in data[contig[0]]])
-
-            #y_values = [random.uniform(0.1, 0.5) for i in range(0, len(current_baits))]
             y_values = [0] * len(current_baits)
             baits_y.extend(y_values)
 
-            start += contig[1]
+        start += contig[1]
 
     tracer = go.Scattergl(x=baits_x, y=baits_y,
                           mode='markers',
-                          marker=dict(size=2, color='#02818a'),
+                          marker=dict(size=4, color='#41ab5d'),
                           showlegend=False,
                           text=baits_labels,
                           hovertemplate=('<b>Contig pos.:<b> %{text}'
@@ -341,7 +406,8 @@ def add_plots_traces(traces, row, col, top_x, top_y, plotly_fig):
   """
   """
 
-  plotly_fig.add_trace(traces[0], row=row, col=col)
+  for t in traces[0]:
+    plotly_fig.add_trace(t, row=row, col=col)
   plotly_fig.update_yaxes(title_text='Coverage', title_font_size=16, row=row, col=col)
   plotly_fig.update_xaxes(title_text='Position', title_font_size=16, domain=[0, 0.9], row=row, col=col)
 

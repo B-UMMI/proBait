@@ -223,15 +223,21 @@ def determine_small_bait(span, bait_size, start, stop, sequence_length):
             the determined bait.
     """
 
+    # bait size is larger than uncovered interval
+    # determine number of bait bases in excess
     rest = bait_size - span
     bot = math.floor(rest / 2)
     top = math.ceil(rest / 2)
+    # uncovered region starts at sequence start
     if start == 0:
         bait_interval = [start, start + bait_size]
+    # centering the bait leads to negative start
     elif (start - bot) < 0:
         bait_interval = [0, top+(bot-start)]
+    # centering the bait leads to stop larger than total sequence
     elif (stop + top) > sequence_length:
         bait_interval = [start-(bot+(top-(sequence_length-stop))), sequence_length]
+    # center bait to get same overlap on both sides
     else:
         bait_interval = [start-bot, stop+top]
 
@@ -264,9 +270,11 @@ def determine_interval_baits(bait_size, start, stop):
     probes = []
     reach = False
     while reach is False:
+        # remaining interval has length equal to bait size
         if (start + bait_size) == stop:
             bait_interval = [start, stop]
             reach = True
+        # remaining interval is smaller than bait size
         elif (start + bait_size) > stop:
             # modify to try to center baits
             diff = (start + bait_size) - stop
