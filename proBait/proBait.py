@@ -354,7 +354,12 @@ def create_report(initial_data, final_data, output_dir, short_ids,
                                      ref_set, nr_contigs)
 
     # depth of coverage values distribution
-    hist_tracers = ru.depth_hists({k: v[4] for k, v in final_data.items()})
+    hist_tracers = ru.depth_hists({k: v[4]
+                                   for k, v in final_data.items()})
+
+    # missing intervals hist tracers
+    missing_intervals_hists_tracers = ru.missing_intervals_hists({k: v[3]
+                                                                  for k, v in final_data.items()})
 
     # depth of coverage per position
     line_tracers, shapes = ru.depth_lines({k: v[3]
@@ -376,7 +381,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
 
     # adding vertical_spacing in combination with row_heights can
     # exceed valid values and lead to error
-    fig = ru.create_subplots_fig(nr_rows, 2, titles, specs_def,
+    fig = ru.create_subplots_fig(nr_rows, 3, titles, specs_def,
                                  shared_yaxes=True, row_heights=row_heights)
 
     # change subplots titles positions
@@ -384,7 +389,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
 
     # add traces to fig
     # configuration table
-    fig.add_trace(config_table, row=1, col=2)
+    fig.add_trace(config_table, row=1, col=3)
 
     # coverage stats table
     fig.add_trace(table_tracer, row=3, col=1)
@@ -394,7 +399,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     for k, v in line_tracers.items():
         top_x = nr_contigs[k] if max_x is None else max_x
         top_y = coverage_values[k] if max_y is None else max_y
-        traces = [v, baits_tracers[k], hist_tracers[k]]
+        traces = [v, baits_tracers[k], hist_tracers[k], missing_intervals_hists_tracers[k]]
         fig = ru.add_plots_traces(traces, r, 1, top_x, top_y, fig)
         r += 1
 
@@ -410,7 +415,7 @@ def create_report(initial_data, final_data, output_dir, short_ids,
         shapes_tracers.extend(traces[0])
         hidden_tracers.append([traces[1], start_hidden, 1])
 
-        ref_axis += 2
+        ref_axis += 3
         start_hidden += 1
 
     # add shapes for contig boundaries
@@ -458,10 +463,10 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     return fig
 
 
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
 #input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/test_assemblies'
 #input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/single_assembly'
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/double_assemblies'
+#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/double_assemblies'
 output_directory = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
 bait_size = 120
 bait_offset = 120
