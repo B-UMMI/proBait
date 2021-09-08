@@ -198,8 +198,10 @@ def write_depth(identifier, depth_values, output_dir):
     return depth_file
 
 
-def determine_small_bait(span, bait_size, start, stop, sequence_length):
-    """ Determines baits for regions shorter than bait length.
+def determine_small_bait(span, bait_size, start,
+                         stop, sequence_length):
+    """ Determines baits for regions shorter than bait
+        length.
 
         Parameters
         ----------
@@ -244,7 +246,7 @@ def determine_small_bait(span, bait_size, start, stop, sequence_length):
     return bait_interval
 
 
-def determine_interval_baits(bait_size, start, stop):
+def determine_interval_baits(bait_size, bait_offset, start, stop, total_len):
     """ Determines baits for regions with length value
         equal or greater than bait size.
 
@@ -270,20 +272,15 @@ def determine_interval_baits(bait_size, start, stop):
     probes = []
     reach = False
     while reach is False:
-        # remaining interval has length equal to bait size
-        if (start + bait_size) == stop:
-            bait_interval = [start, stop]
+        # remaining interval has length equal or greater than bait size
+        if (start + bait_size) >= stop:
+            span = stop - start
+            bait_interval = determine_small_bait(span, bait_size,
+                                                 start, stop, total_len)
             reach = True
-        # remaining interval is smaller than bait size
-        elif (start + bait_size) > stop:
-            # modify to try to center baits
-            diff = (start + bait_size) - stop
-            bot_plus = start - diff
-            bait_interval = [bot_plus, stop]
-            reach = True
-        else:
-            bait_interval = [start, start + bait_size]
-            start = start + bait_size
+        elif (start + bait_size) < stop:
+            bait_interval = [start, start+bait_size]
+            start = start + bait_offset
         probes.append(bait_interval)
 
     return probes
@@ -378,9 +375,8 @@ def determine_missing_intervals(intervals, identifier, total_len):
             if g[0] == 0:
                 missing_regions[identifier].append([start, start+len(g)])
                 not_covered += len(g)
-                start += len(g)
-            else:
-                start += len(g)
+
+            start += len(g)
 
     # add terminal region
     if start != total_len:
@@ -390,8 +386,9 @@ def determine_missing_intervals(intervals, identifier, total_len):
     return [missing_regions, not_covered]
 
 
+# add bait_overlap parameter!
 def cover_intervals(intervals, total_len, bait_size,
-                    minimum_region):
+                    minimum_region, bait_offset):
     """ Determines baits to cover specified sequence regions.
 
         Parameters
@@ -417,20 +414,26 @@ def cover_intervals(intervals, total_len, bait_size,
 
     cover_baits = []
     for i in intervals:
-        span = i[1] - i[0]
+        start = i[0]
+        stop = i[1]
+        span = stop - start
         # check if uncovered region is equal or greater than
         # minimum length value defined for uncovered regions
         if span >= minimum_region:
             if span < bait_size:
                 bait_interval = determine_small_bait(span, bait_size,
-                                                     i[0], i[1],
+                                                     start, stop,
                                                      total_len)
                 cover_baits.append(bait_interval)
             # will slide and determine baits
             # if in the last iter, uncovered region is very small it will overlap
             # with regions that are already covered and increase depth of coverage
             elif span >= bait_size:
-                probes = determine_interval_baits(bait_size, i[0], i[1])
+                # subtract bait offset to start position to ensure overlap
+                # do not subtract offset if it leads to negative position
+                if bait_offset < bait_size and (start-bait_offset) >= 0:
+                    start -= bait_offset
+                probes = determine_interval_baits(bait_size, bait_offset, start, stop, total_len)
                 cover_baits.extend(probes)
 
     return cover_baits

@@ -369,7 +369,9 @@ def determine_distinct(sequences_file, unique_fasta):
                 write_to_file(out_seqs, unique_fasta, 'a', '\n')
                 out_seqs = []
 
-    unique_seqids = list(seqs_dict.values())
+    # determine set to deduplicate identifiers
+    # added for sense and rev strands
+    unique_seqids = set(list(seqs_dict.values()))
 
     return [total, unique_seqids]
 

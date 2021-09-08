@@ -23,11 +23,10 @@ except:
     import proBait.general_utils as gu
 
 
-#fasta_input = genomes[1]
-#output_dir = bait_creation_dir
-def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
-                               bait_coverage, bait_identity, minimum_region,
-                               nr_contigs, short_samples, minimum_exact_match,
+def incremental_bait_generator(fasta_input, unique_baits, output_dir,
+                               bait_size, bait_coverage, bait_identity,
+                               bait_offset, minimum_region, nr_contigs,
+                               short_samples, minimum_exact_match,
                                generate=False, depth=False):
     """
     """
@@ -70,9 +69,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
     # cs: Difference string.
     # go to https://lh3.github.io/minimap2/minimap2.html#10
 
-    # filter out secondary alignments???
-
-    # filter out alignments below bait_coverage*bait_size
+    # filter out alignments with length below bait_coverage*bait_size
     # we use the total number of bases, including gaps
     valid_length = [line
                     for line in paf_lines
@@ -91,9 +88,13 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
         invalid_mappings[i].append(int(invalid_mappings[i][9]) / int(invalid_mappings[i][10]))
 
     # filter out alignments below defined identity
-    valid_pident = [line for line in valid_length if line[-1] >= bait_identity]
+    valid_pident = [line
+                    for line in valid_length
+                    if line[-1] >= bait_identity]
 
-    invalid_mappings.extend([line for line in valid_length if line[-1] < bait_identity])
+    invalid_mappings.extend([line
+                             for line in valid_length
+                             if line[-1] < bait_identity])
 
     # match alignment string with regex
     pattern = r':[0-9]+|\*[a-z][a-z]|\+[a-z]+|-[a-z]+'
@@ -106,17 +107,28 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
         current = invalid_mappings[i][-2]
         invalid_mappings[i].append(gu.regex_matcher(current, pattern))
 
-    # filter out alignments that do not have at least N sequential matching bases
-    valid_stretch = {i: l[-1] for i, l in enumerate(valid_pident)}
-    valid_stretch = {i: [e for e in l if e.startswith(':')] for i, l in valid_stretch.items()}
-    valid_stretch = {i: [int(e.lstrip(':')) for e in l] for i, l in valid_stretch.items()}
-    valid_stretch = {i: sorted(l, reverse=True) for i, l in valid_stretch.items()}
+    # filter out alignments that do not have at least
+    # N sequential matching bases
+    valid_stretch = {i: l[-1]
+                     for i, l in enumerate(valid_pident)}
+    valid_stretch = {i: [e for e in l if e.startswith(':')]
+                     for i, l in valid_stretch.items()}
+    valid_stretch = {i: [int(e.lstrip(':')) for e in l]
+                     for i, l in valid_stretch.items()}
+    valid_stretch = {i: sorted(l, reverse=True)
+                     for i, l in valid_stretch.items()}
 
-    invalid_cases = [i for i, l in valid_stretch.items() if l[0] < minimum_exact_match]
-    invalid_mappings.extend([valid_pident[i] for i in invalid_cases])
+    invalid_cases = [i
+                     for i, l in valid_stretch.items()
+                     if l[0] < minimum_exact_match]
+    invalid_mappings.extend([valid_pident[i]
+                             for i in invalid_cases])
 
-    valid_cases = [i for i, l in valid_stretch.items() if l[0] >= minimum_exact_match]
-    valid_pident = [valid_pident[i] for i in valid_cases]
+    valid_cases = [i
+                   for i, l in valid_stretch.items()
+                   if l[0] >= minimum_exact_match]
+    valid_pident = [valid_pident[i]
+                    for i in valid_cases]
 
     # get info that matters from discarded baits
     discarded = {}
@@ -163,10 +175,13 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
                for k, v in merged_intervals.items()]
 
     # add missing regions for contigs that had 0 baits mapped
-    not_mapped = [[{c: [[0, len(contigs[c])]]}, len(contigs[c])] for c in contigs if c not in merged_intervals]
+    not_mapped = [[{c: [[0, len(contigs[c])]]}, len(contigs[c])]
+                  for c in contigs if c not in merged_intervals]
     missing.extend(not_mapped)
 
-    missing_regions = {k: v for i in missing for k, v in i[0].items()}
+    missing_regions = {k: v
+                       for i in missing
+                       for k, v in i[0].items()}
     # save missing intervals
     missing_file = os.path.join(output_dir, '{0}_missing'.format(short_id))
     gu.pickle_dumper(missing_regions, missing_file)
@@ -177,11 +192,12 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir, bait_size,
 
     # create baits for missing regions
     if generate is True:
-        missing_baits_intervals = {k: mu.cover_intervals(v, len(contigs[k]), bait_size, minimum_region)
+        missing_baits_intervals = {k: mu.cover_intervals(v, len(contigs[k]), bait_size, minimum_region, bait_offset)
                                    for k, v in missing_regions.items()}
 
         # get sequences of all probes
-        baits_seqs = [str(rec.seq) for rec in SeqIO.parse(unique_baits, 'fasta')]
+        baits_seqs = [str(rec.seq)
+                      for rec in SeqIO.parse(unique_baits, 'fasta')]
 
         # create fasta strings
         extra_probes = {}
@@ -296,13 +312,19 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
 
     # import mapping results
     mapped_probes = gu.read_tabular(paf_path)
+    # select alignments above defined identity and coverage
     multispecific_probes = [l[0] for l in mapped_probes
                             if (int(l[9])/int(l[10])) >= exclude_pident
                             and (int(l[3])-int(l[2])) >= (bait_size*exclude_coverage)]
 
+    # deduplicate baits ientifiers
+    multispecific_probes = list(set(multispecific_probes))
+
     # remove probes and write final probe set
     baits = gu.import_sequences(unique_baits)
-    baits = {k: v for k, v in baits.items() if k not in multispecific_probes}
+    baits = {k: v
+             for k, v in baits.items()
+             if k not in multispecific_probes}
 
     print('Removed {0} probes similar with contaminant '
           'genome.'.format(len(multispecific_probes)))
@@ -314,13 +336,6 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
     return [final_baits, multispecific_probes]
 
 
-#initial_data = coverage_info
-#final_data = final_info
-#short_ids = short_samples
-#total_baits = nr_baits+total
-#output_dir = report_dir
-#initial_baits = nr_baits
-#iter_baits = total
 def create_report(initial_data, final_data, output_dir, short_ids,
                   ordered_contigs, fixed_xaxis, fixed_yaxis, ref_set,
                   nr_contigs, configs, baits_pos, total_baits,
@@ -463,33 +478,44 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     return fig
 
 
-input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/test_assemblies'
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/single_assembly'
-#input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/double_assemblies'
-output_directory = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
-bait_size = 120
-bait_offset = 120
-refs = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/refs.txt'
-bait_identity = 0.8
-bait_coverage = 0.9
-minimum_region = 120
-minimum_exact_match = 30
-cluster_probes = False
-cluster_identity = 0.85
-cluster_coverage = 0.9
-minimum_sequence_length = 120
-#exclude_regions = None
-#exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-exclude_regions = None
-exclude_pident = 0.7
-exclude_coverage = 0.7
-threads = 4
-fixed_xaxis = True
-fixed_yaxis = True
-report = True
-report_identities = [0.8]
-report_coverages = [0.9]
+def write_tsv_output(baits_file, output_file):
+    """
+    """
+
+    baits_records = SeqIO.parse(baits_file, 'fasta')
+    baits_lines = ['{0}\t{1}'.format(rec.id, str(rec.seq))
+                   for rec in baits_records]
+
+    with open(output_file, 'w') as outfile:
+        outfile.write('\n'.join(baits_lines)+'\n')
+
+    return len(baits_lines)
+
+
+# input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
+# output_directory = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+# bait_size = 120
+# bait_offset = 60
+# refs = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/refs.txt'
+# bait_identity = 0.85
+# bait_coverage = 0.9
+# minimum_region = 60
+# minimum_exact_match = 40
+# cluster_probes = False
+# cluster_identity = 0.85
+# cluster_coverage = 0.9
+# minimum_sequence_length = 120
+# exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
+# #exclude_regions = None
+# exclude_pident = 0.5
+# exclude_coverage = 0.6
+# threads = 4
+# fixed_xaxis = True
+# fixed_yaxis = True
+# report = True
+# report_identities = [0.85]
+# report_coverages = [0.9]
+# tsv_output = True
 
 # determine length of subsequences with 0 coverage and etc
 # number of SNPs, deletions, insertions and etc
@@ -518,15 +544,13 @@ report_coverages = [0.9]
 # info somehow...). Adding these lines should not increase report file size
 # that much because each interval will only have 2 points to represent
 # accepted baits, refused baits or uncovered regions.
-
-# add option to only accept alignments that have at least N consecutive matching bases?
 def main(input_files, output_directory, mode, minimum_sequence_length,
          refs, bait_size, bait_offset,
          bait_identity, bait_coverage, minimum_region, minimum_exact_match,
          cluster_probes, cluster_identity, cluster_coverage,
          exclude_regions, exclude_pident, exclude_coverage, threads,
          report, report_identities, report_coverages, fixed_xaxis,
-         fixed_yaxis):
+         fixed_yaxis, tsv_output):
 
     # create output directory if it does not exist
     exists = gu.create_directory(output_directory)
@@ -581,7 +605,7 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
         generated = incremental_bait_generator(g, unique_baits,
                                                bait_creation_dir, bait_size,
                                                bait_coverage, bait_identity,
-                                               minimum_region,
+                                               bait_offset, minimum_region,
                                                nr_contigs, short_samples,
                                                minimum_exact_match,
                                                generate=True, depth=False)
@@ -606,7 +630,9 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
                                                        cluster_coverage,
                                                        bait_size,
                                                        threads)
+        total -= len(removed)
 
+    # need to copy the Fasta file without the excluded baits to the main output directory!
     exclude_stats = 'None'
     if exclude_regions is not None:
         exclude_dir = os.path.join(output_directory, 'exclude')
@@ -621,6 +647,13 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
         exclude_stats = [len(rec)
                          for rec in SeqIO.parse(exclude_regions, 'fasta')]
         exclude_stats = len(exclude_stats)
+        total -= len(removed)
+
+    # create TSV output with bait identifier and bait sequence columns
+    if tsv_output is True:
+        tsv_output_file = os.path.join(output_directory, 'unique_baits.tsv')
+        tsv_baits = write_tsv_output(unique_baits, tsv_output_file)
+        print('Wrote {0} baits to {1}'.format(tsv_baits, tsv_output_file))
 
     if report is True:
         # create report directory
@@ -638,14 +671,17 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
                    'Bait offset': bait_offset,
                    'Bait identity': bait_identity,
                    'Bait coverage': bait_coverage,
-                   'Cluster probes': str(cluster_probes),
-                   'Cluster identity': cluster_identity,
-                   'Cluster coverage': cluster_coverage,
-                   'Exclude regions': '{0} regions'.format(exclude_stats),
-                   'Exclude identity': exclude_pident,
-                   'Exclude coverage': exclude_coverage,
-                   'Report bait identity': None,
-                   'Report bait coverage': None}
+                   'Minimum exact match': minimum_exact_match}
+
+        configs['Cluster probes'] = str(cluster_probes)
+        if cluster_probes is True:
+            configs['Cluster identity'] = cluster_identity
+            configs['Cluster coverage'] = cluster_coverage
+        
+        configs['Sequences to exclude'] = '{0}'.format(exclude_stats)
+        if exclude_stats != 'None':
+            configs['Exclusion identity'] = exclude_pident
+            configs['Exclusion coverage'] = exclude_coverage
 
         # get baits positions
         baits_pos = gu.get_baits_pos(unique_baits, short_samples)
@@ -667,9 +703,9 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
                 generated = incremental_bait_generator(g, unique_baits,
                                                        final_coverage_dir,
                                                        bait_size, report_coverages[i],
-                                                       v, minimum_region,
+                                                       v, bait_offset, minimum_region,
                                                        nr_contigs, short_samples,
-                                                       minimum_exact_match,
+                                                       0,
                                                        generate=False, depth=True)
                 final_info[short_samples[g]] = generated[0]
                 discarded_baits_files.append(generated[2])
@@ -866,6 +902,11 @@ def parse_arguments():
     parser.add_argument('-fy', '--fixed-yaxis', required=False,
                         action='store_true',
                         dest='fixed_yaxis',
+                        help='')
+    
+    parser.add_argument('-tsv', '--tsv-output', required=False,
+                        action='store_true',
+                        dest='tsv_output',
                         help='')
 
     args = parser.parse_args()
