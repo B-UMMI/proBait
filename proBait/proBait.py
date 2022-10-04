@@ -9,19 +9,23 @@ import os
 import csv
 import argparse
 
+import pandas as pd
 from Bio import SeqIO
+import datapane as dp
+import plotly.graph_objs as go
 
-try:
-    import map_utils as mu
-    import report_utils as ru
-    import cluster_utils as cu
-    import general_utils as gu
-except:
-    import proBait.map_utils as mu
-    import proBait.report_utils as ru
-    import proBait.cluster_utils as cu
-    import proBait.general_utils as gu
+#try:
+import map_utils as mu
+import report_utils as ru
+import cluster_utils as cu
+import general_utils as gu
+#except:
+    # import proBait.map_utils as mu
+    # import proBait.report_utils as ru
+    # import proBait.cluster_utils as cu
+    # import proBait.general_utils as gu
 
+dp.enable_logging()
 
 def incremental_bait_generator(fasta_input, unique_baits, output_dir,
                                bait_size, bait_coverage, bait_identity,
@@ -336,12 +340,34 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
     return [final_baits, multispecific_probes]
 
 
-def create_report(initial_data, final_data, output_dir, short_ids,
-                  ordered_contigs, fixed_xaxis, fixed_yaxis, ref_set,
-                  nr_contigs, configs, baits_pos, total_baits,
-                  initial_baits, iter_baits, missing_files):
+# configs = configs
+# initial_data = coverage_info
+# final_data = final_info
+# ref_set = ref_set
+# nr_contigs = nr_contigs
+# fixed_xaxis = fixed_xaxis
+# fixed_yaxis = fixed_yaxis
+# ordered_contigs = ordered_contigs
+# missing_files = missing_files
+# baits_pos= baits_pos
+# total_baits = nr_baits+total
+def create_report(configs, initial_data, final_data, ref_set,
+                  nr_contigs, fixed_xaxis, fixed_yaxis, ordered_contigs,
+                  missing_files, baits_pos, total_baits):
     """
     """
+
+    # create summary text
+    summary_text = ru.add_summary_text()
+
+    # create parameters table
+    config_df = pd.DataFrame(configs.items(), columns=['Parameter', 'Value'])
+    config_df = config_df.set_index('Parameter')
+    parameter_table = dp.Table(config_df)
+
+    # create coverage table
+    coverage_table, coverage_df = ru.coverage_table(initial_data, final_data, ref_set, nr_contigs)
+    #coverage_df = coverage_df.set_index('Sample')
 
     # check if user wants equal yaxis ranges for all line plots
     max_x = None
@@ -352,21 +378,6 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     coverage_values = {k: max(list(v[4].keys())) for k, v in final_data.items()}
     if fixed_yaxis is True:
         max_y = max(coverage_values.values())
-
-    # create table with run summary
-    config_table = ru.create_table_tracer(['Parameter', 'Value'],
-                                          dict(size=16),
-                                          dict(color='#ffffff', width=2),
-                                          dict(color='#9ecae1'),
-                                          [list(configs.keys()),
-                                           list(configs.values())],
-                                          dict(size=14),
-                                          dict(color='#ffffff', width=1),
-                                          dict(color='#f0f0f0'),
-                                          dict(x=[0.5, 1.0], y=[0.2, 1.0]))
-
-    table_tracer = ru.coverage_table(initial_data, final_data,
-                                     ref_set, nr_contigs)
 
     # depth of coverage values distribution
     hist_tracers = ru.depth_hists({k: v[4]
@@ -385,97 +396,96 @@ def create_report(initial_data, final_data, output_dir, short_ids,
     baits_tracers = {k: ru.baits_tracer(baits_pos[k], v)
                      for k, v in ordered_contigs.items() if k in baits_pos}
 
-    nr_rows = len(line_tracers) + 4
-
-    titles = ru.subplot_titles(list(short_ids.values()))
-
-    specs_def = ru.report_specs(len(line_tracers))
-
-    # define figure height
-    total_height, row_heights = ru.figure_height(190, 150, 505, len(line_tracers))
-
-    # adding vertical_spacing in combination with row_heights can
-    # exceed valid values and lead to error
-    fig = ru.create_subplots_fig(nr_rows, 3, titles, specs_def,
-                                 shared_yaxes=True, row_heights=row_heights)
-
-    # change subplots titles positions
-    fig = ru.adjust_subplot_titles(fig)
-
-    # add traces to fig
-    # configuration table
-    fig.add_trace(config_table, row=1, col=3)
-
-    # coverage stats table
-    fig.add_trace(table_tracer, row=3, col=1)
-
-    # depth of coverage plots traces and baits start position traces
-    r = 5
+    figs = {}
     for k, v in line_tracers.items():
-        top_x = nr_contigs[k] if max_x is None else max_x
-        top_y = coverage_values[k] if max_y is None else max_y
-        traces = [v, baits_tracers[k], hist_tracers[k], missing_intervals_hists_tracers[k]]
-        fig = ru.add_plots_traces(traces, r, 1, top_x, top_y, fig)
-        r += 1
+        #top_x = nr_contigs[k] if max_x is None else max_x
+        #top_y = coverage_values[k] if max_y is None else max_y
+        fig = go.Figure(data=[*v])
+        figs[k] = fig
 
-    # create shapes for contig boundaries
-    ref_axis = 1
-    shapes_tracers = []
-    hidden_tracers = []
-    start_hidden = 5
-    for k, v in shapes.items():
-        y_value = coverage_values[k] if max_y is None else max_y
-        traces = ru.create_shapes(list(shapes[k]), y_value, ref_axis)
+    # Datapane only accepts Figure objects, cannot pass Bar, Scatter, etc objects
+    hist_figs = {}
+    for k in hist_tracers:
+        hist_figs[k] = go.Figure(data=hist_tracers[k])
 
-        shapes_tracers.extend(traces[0])
-        hidden_tracers.append([traces[1], start_hidden, 1])
+    miss_figs = {}
+    for k in missing_intervals_hists_tracers:
+        miss_figs[k] = go.Figure(data=missing_intervals_hists_tracers[k])
 
-        ref_axis += 3
-        start_hidden += 1
+    # create big number objects for summary stats page
+    total_bn = dp.BigNumber(heading='Total baits', value=total_baits)
+    mean_coverage_bn = dp.BigNumber(heading='Mean coverage', value=round(coverage_df['Final breadth of coverage'].mean(), 3))
+    mean_depth_bn = dp.BigNumber(heading='Mean depth', value=round(coverage_df['Mean depth of coverage'].mean(), 3))
 
-    # add shapes for contig boundaries
-    fig.update_layout(shapes=shapes_tracers, clickmode='event')
+    # create Group objects for Depth page
+    depth_groups = []
+    for k in figs:
+        depth_groups.append(
+            dp.Group(
+                dp.Group(
+                    dp.BigNumber(heading='Mean coverage', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Final breadth of coverage'].tolist()[0]),
+                    dp.BigNumber(heading='Mean depth', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Mean depth of coverage'].tolist()[0]),
+                    dp.BigNumber(heading='Generated probes', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Generated probes'].tolist()[0]),
+                    columns=3
+                ),
+                dp.Plot(figs[k]),
+                dp.Group(
+                    dp.Plot(hist_figs[k]),
+                    dp.Plot(miss_figs[k]),
+                    columns=2
+                ),
+                label=k,
+            )
+        )
 
-    # add hidden tracers to display contig boundaries hover
-    for h in hidden_tracers:
-        traces = h[0]
-        row = h[1]
-        col = h[2]
-        for t in traces:
-            fig.add_trace(t, row, col)
+    # create report object
+    report = dp.Report(
+        dp.Page(title='Summary', blocks=[
+                                    dp.Group(summary_text, parameter_table, columns=2),
+                                    dp.Group(total_bn, mean_coverage_bn, mean_depth_bn, columns=3),
+                                    coverage_table]
+                ),
+        dp.Page(title='Coverage analysis', blocks=[
+                                    dp.Select(blocks=depth_groups, type=dp.SelectType.DROPDOWN)]
+                ),
+        layout=dp.PageLayout.SIDE
+        )
 
-    # disable grid
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=False, showline=True, linecolor='black')
+    # # create shapes for contig boundaries
+    # ref_axis = 1
+    # shapes_tracers = []
+    # hidden_tracers = []
+    # start_hidden = 5
+    # for k, v in shapes.items():
+    #     y_value = coverage_values[k] if max_y is None else max_y
+    #     traces = ru.create_shapes(list(shapes[k]), y_value, ref_axis)
 
-    # bars with distribution of depth values in logscale
-    for i in range(5, 5+len(line_tracers)):
-        fig.update_xaxes(type='log', row=i, col=2)
+    #     shapes_tracers.extend(traces[0])
+    #     hidden_tracers.append([traces[1], start_hidden, 1])
 
-    fig = ru.add_plots_titles(fig)
+    #     ref_axis += 3
+    #     start_hidden += 1
 
-    # add summary text
-    fig = ru.add_summary_text(fig, total_baits, initial_baits,
-                              configs['Bait size'], configs['Bait offset'],
-                              iter_baits, total_height)
+    # # add shapes for contig boundaries
+    # fig.update_layout(shapes=shapes_tracers, clickmode='event')
 
-    # line plots need fixed space
-    fig.update_layout(title=dict(text='<b>proBait - Coverage Report</b>',
-                                 x=0,
-                                 xref='paper',
-                                 xanchor='left',
-                                 font=dict(size=30)),
-                      height=total_height,
-                      width=1920,
-                      template='ggplot2',
-                      plot_bgcolor='rgba(0,0,0,0)')
+    # # add hidden tracers to display contig boundaries hover
+    # for h in hidden_tracers:
+    #     traces = h[0]
+    #     row = h[1]
+    #     col = h[2]
+    #     for t in traces:
+    #         fig.add_trace(t, row, col)
 
-    output_plot = os.path.join(output_dir, 'proBait_report_idnt{0}_cov{1}.html'
-                               ''.format(configs['Report bait identity'],
-                                         configs['Report bait coverage']))
-    ru.create_html_report(fig, output_plot)
+    # # disable grid
+    # fig.update_xaxes(showgrid=False)
+    # fig.update_yaxes(showgrid=False, showline=True, linecolor='black')
 
-    return fig
+    # # bars with distribution of depth values in logscale
+    # for i in range(5, 5+len(line_tracers)):
+    #     fig.update_xaxes(type='log', row=i, col=2)
+
+    return report
 
 
 def write_tsv_output(baits_file, output_file):
@@ -492,11 +502,11 @@ def write_tsv_output(baits_file, output_file):
     return len(baits_lines)
 
 
-# input_files = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/assemblies'
-# output_directory = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/tmp'
+# input_files = 'assemblies'
+# output_directory = 'bait_generation'
 # bait_size = 120
 # bait_offset = 60
-# refs = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/refs.txt'
+# refs = 'refs.txt'
 # bait_identity = 0.85
 # bait_coverage = 0.9
 # minimum_region = 60
@@ -505,16 +515,15 @@ def write_tsv_output(baits_file, output_file):
 # cluster_identity = 0.85
 # cluster_coverage = 0.9
 # minimum_sequence_length = 120
-# exclude_regions = '/home/rfm/Desktop/rfm/Lab_Analyses/pneumo_baits_design/ncbi-genomes-2020-11-16/GCF_000001405.39_GRCh38.p13_genomic.fna'
-# #exclude_regions = None
+# exclude_regions = None
 # exclude_pident = 0.5
 # exclude_coverage = 0.6
 # threads = 4
 # fixed_xaxis = True
 # fixed_yaxis = True
 # report = True
-# report_identities = [0.85]
-# report_coverages = [0.9]
+# report_identities = [0.95]
+# report_coverages = [0.95]
 # tsv_output = True
 
 # determine length of subsequences with 0 coverage and etc
@@ -723,11 +732,13 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
             exists = gu.create_directory(depth_files_dir)
             depth_files = [mu.write_depth(k, v[3], depth_files_dir) for k, v in final_info.items()]
 
-            test_fig = create_report(coverage_info, final_info, report_dir,
-                                     short_samples, ordered_contigs, fixed_xaxis,
-                                     fixed_yaxis, ref_set, nr_contigs,
-                                     configs, baits_pos, nr_baits+total, nr_baits,
-                                     total, missing_files)
+            test_report = create_report(configs, coverage_info, final_info, ref_set, nr_contigs, fixed_xaxis,
+                                        fixed_yaxis, ordered_contigs, missing_files, baits_pos, nr_baits+total)
+
+            report_html = os.path.join(output_directory,
+                                       'proBait_report_idnt{0}_cov{1}.html'.format(configs['Report bait identity'],
+                                                                                   configs['Report bait coverage']))
+            test_report.save(path=report_html)
 
             print('\nCoverage report for bait_identity={0} and '
                   'bait_coverage={1} available in {2}'.format(v, report_coverages[i], report_dir))
@@ -917,5 +928,4 @@ def parse_arguments():
 if __name__ == '__main__':
 
     args = parse_arguments()
-
     main(**vars(args))
