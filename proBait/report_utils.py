@@ -26,13 +26,14 @@ def depth_hists(depth_values):
     for k, v in depth_values.items():
         x_values = list(v.values())
         y_values = list(v.keys())
-        tracer = go.Bar(x=x_values,
-                        y=y_values,
-                        hovertemplate=('<b>Coverage:<b> %{y}'
-                                       '<br><b>Number of pos.:<b> %{x}'),
-                        marker=dict(color='#67a9cf'),
-                        showlegend=False,
-                        orientation='h')
+        tracer = go.Bar(x=y_values,
+                        y=x_values,
+                        hovertemplate=('<b>Coverage:<b> %{x}'
+                                       '<br><b>Number of pos.:<b> %{y}'),
+                        marker=dict(color='rgba(180, 202, 224, 0.7)',
+                                    line_color='#045a8d',
+                                    line_width=1.5),
+                        showlegend=False)
         tracers[k] = tracer
 
     return tracers
@@ -60,7 +61,9 @@ def missing_intervals_hists(depth_values):
                              y=y_values,
                              hovertemplate=('<b>Interval size:<b> %{x}'
                                             '<br><b>Count:<b> %{y}'),
-                             marker=dict(color='#67a9cf'),
+                             marker=dict(color='rgba(180, 202, 224, 0.7)',
+                                         line_color='#045a8d',
+                                         line_width=1.5),
                              showlegend=False)
 
         tracers[k] = hist_tracer
@@ -118,39 +121,6 @@ def depth_lines(depth_values, ordered_contigs, missing_files):
                 stops.append(cumulative_pos+m[1]-1)
                 stops_hovertext.append(str(m[1]))
 
-            # create tracers
-            tracer_starts = go.Scattergl(x=starts,
-                                         y=[0.2]*len(starts),
-                                         # add +1 to start to get 1-based coordinates
-                                         text=starts_hovertext,
-                                         hovertemplate=('<b>Contig pos.:<b> %{text}'
-                                                        '<br><b>Cumulative pos.:<b> %{x}'),
-                                         showlegend=False,
-                                         mode='markers',
-                                         marker=dict(color='#252525', size=5, symbol='arrow-right'))
-
-            tracer_stops = go.Scattergl(x=stops,
-                                        y=[0.2]*len(stops),
-                                        # add +1 to start to get 1-based coordinates
-                                        text=stops_hovertext,
-                                        hovertemplate=('<b>Contig pos.:<b> %{text}'
-                                                       '<br><b>Cumulative pos.:<b> %{x}'),
-                                        showlegend=False,
-                                        mode='markers',
-                                        marker=dict(color='#252525', size=5, symbol='arrow-left'))
-
-            tracers[k].extend([tracer_starts, tracer_stops])
-                # tracer_miss = go.Scattergl(x=[(cumulative_pos)+m[0], (cumulative_pos)+m[1]-1],
-                #                            y=[0, 0],
-                #                            # add +1 to start to get 1-based coordinates
-                #                            text=[str(m[0]+1), str(m[1])],
-                #                            hovertemplate=('<b>Contig pos.:<b> %{text}'
-                #                                           '<br><b>Cumulative pos.:<b> %{x}'),
-                #                            showlegend=False,
-                #                            mode='lines',
-                #                            line=dict(color='#252525', width=1))
-                # tracers[k].append(tracer_miss)
-
             # group depth values into groups of equal sequential values
             values_groups = [list(j) for i, j in groupby(c[0].values())]
             shape_start = cumulative_pos
@@ -180,8 +150,8 @@ def depth_lines(depth_values, ordered_contigs, missing_files):
                                              '<br><b>Coverage:<b> %{y}'),
                               showlegend=False,
                               mode='lines',
-                              line=dict(color='#3690c0', width=0.5))#,
-                              #fill='tozeroy')
+                              line=dict(color='#045a8d', width=0.5),
+                              fill='tozeroy')
         tracers[k].append(tracer)
 
     return [tracers, shapes]
@@ -262,36 +232,6 @@ def create_shape(xref, yref, xaxis_pos, yaxis_pos,
     return shape_tracer
 
 
-def create_subplots_fig(nr_rows, nr_cols, titles, specs,
-                        shared_yaxes, row_heights):
-    """
-    """
-
-    fig = make_subplots(rows=nr_rows, cols=nr_cols,
-                        subplot_titles=titles,
-                        #vertical_spacing=vertical_spacing,
-                        #horizontal_spacing=horizontal_spacing,
-                        shared_yaxes=shared_yaxes,
-                        #column_widths=[0.9, 0.1],
-                        specs=specs,
-                        row_heights=row_heights)
-
-    return fig
-
-
-def create_html_report(plotly_fig, output_file, plotlyjs=True):
-    """
-        
-        plotlyjs --> option include True, 'cdn'...check
-        https://plotly.com/python/interactive-html-export/
-
-    """
-
-    plot(plotly_fig, filename=output_file,
-         auto_open=False, include_plotlyjs=plotlyjs,
-         config={"displayModeBar": False, "showTips": False})
-
-
 def baits_tracer(data, ordered_contigs):
     """
     """
@@ -342,138 +282,18 @@ def create_scatter(x_values, y_values, mode, hovertext):
     return tracer
 
 
-def report_specs(number_of_inputs):
-    """
-    """
-
-    specs_def = [[{'type': 'table', 'rowspan': 2, 'colspan': 2},
-                  None,
-                  {'type': 'table', 'rowspan': 2, 'colspan': 1}],
-                 [None,
-                  None,
-                  None],
-                 [{'type': 'table', 'rowspan': 2, 'colspan': 3},
-                  None,
-                  None],
-                 [None,
-                  None,
-                  None]] + \
-                [[{'type': 'scatter', 'rowspan': 1, 'colspan': 1},
-                  {'type': 'bar', 'rowspan': 1, 'colspan': 1},
-                  {'type': 'bar', 'rowspan': 1, 'colspan': 1}]]*number_of_inputs
-
-    return specs_def
-
-
-def subplot_titles(inputs_ids):
-    """
-    """
-
-    titles = [' ', '', '<b>Configuration</b>', '<b>Coverage statistics</b>']
-    for s in inputs_ids:
-        titles += ['<b>{0}</b>'.format(s), '', '']
-
-    return titles
-
-
-def figure_height(plot_height, table_height, config_height, total_plots):
-    """
-    """
-
-    total_height = int(plot_height*total_plots + table_height*(total_plots/4) + config_height)
-    plots_percentage = round((plot_height*total_plots) / total_height, 2)
-    coverage_table_percentage = round((table_height*(total_plots/4)) / total_height, 2)
-    summary_table_percentage = round(1 - (plots_percentage+coverage_table_percentage), 2)
-
-    # determine row heights
-    plot_height = plots_percentage / total_plots
-
-    row_heights = [summary_table_percentage/2]*2 +\
-                  [coverage_table_percentage/2]*2 +\
-                  [plot_height]*(total_plots)
-
-    return [total_height, row_heights]
-
-
-def adjust_subplot_titles(plotly_fig):
-    """
-    """
-
-    # adjust configuration table title position and style
-    # lock table position to subplot x0 and y1 positions
-    subplot12_x = plotly_fig.get_subplot(1, 3).x[0]
-    subplot12_y = plotly_fig.get_subplot(1, 3).y[1]
-    plotly_fig.layout.annotations[1].update(x=subplot12_x, xref='paper',
-                                            xanchor='left', y=subplot12_y,
-                                            font=dict(size=18))
-
-    # adjust coverage table
-    # lock to subplot x0 and y1
-    subplot31_x = plotly_fig.get_subplot(3, 1).x[0]
-    subplot31_y = plotly_fig.get_subplot(3, 1).y[1]
-    plotly_fig.layout.annotations[2].update(x=subplot31_x, xref='paper',
-                                            xanchor='left', y=subplot31_y,
-                                            font=dict(size=18))
-
-    # lock depth of coverage plots to paper x0
-    for a in plotly_fig.layout.annotations[3:]:
-        a.update(x=0, xref='paper', xanchor='left',
-                 font=dict(size=18))
-
-    return plotly_fig
-
-
-def add_plots_traces(traces, row, col, top_x, top_y, plotly_fig):
-    """
-    """
-
-    for t in traces[0]:
-        plotly_fig.add_trace(t, row=row, col=col)
-
-    plotly_fig.update_yaxes(title_text='Coverage', title_font_size=16, row=row, col=col)
-    plotly_fig.update_xaxes(title_text='Position', title_font_size=16, domain=[0, 0.8], row=row, col=col)
-
-    # scatter trace with baits start positions
-    plotly_fig.add_trace(traces[1], row=row, col=col)
-
-    # add tracer with depth values distribution
-    plotly_fig.add_trace(traces[2], row=row, col=col+1)
-    plotly_fig.update_yaxes(showticklabels=False, ticks='', row=row, col=col+1)
-    plotly_fig.update_xaxes(showticklabels=False, ticks='', domain=[0.805, 0.9], row=row, col=col+1)
-
-    # add tracer with missing intervals
-    plotly_fig.add_trace(traces[3], row=row, col=col+2)
-    plotly_fig.update_yaxes(showticklabels=False, ticks='', row=row, col=col+2)
-    plotly_fig.update_xaxes(domain=[0.905, 1.0], row=row, col=col+2)
-
-    # adjust axis range
-    plotly_fig.update_xaxes(range=[-0.2, top_x], row=row, col=col)
-    y_step = int(top_y/4) if int(top_y/4) > 0 else 1
-    y_tickvals = list(range(0, top_y, y_step))
-    if top_y not in y_tickvals:
-        y_tickvals += [top_y]
-    plotly_fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], tickvals=y_tickvals, row=row, col=col)
-    plotly_fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=row, col=col+1)
-    plotly_fig.update_yaxes(range=[0-top_y*0.08, top_y+(top_y*0.08)], row=row, col=col+2)
-
-    return plotly_fig
-
-
-def create_shapes(shapes_data, y_value, ref_axis):
+def create_shapes(shapes_data, y_value):
     """
     """
 
     shapes_traces = []
     hidden_traces = []
     for i, s in enumerate(shapes_data):
-        axis_str = '' if ref_axis == 1 else ref_axis
-        xref = 'x{0}'.format(axis_str)
-        yref = 'y{0}'.format(axis_str)
         # do not create line for last contig
         if s != shapes_data[-1]:
             # only create tracer for end position
             # start position is equal to end position of previous contig
-            shape_tracer = create_shape(xref, yref, [s[1], s[1]], [0, y_value])
+            shape_tracer = create_shape('x', 'y', [s[1], s[1]], [0, y_value])
             shapes_traces.append(shape_tracer)
             # create invisible scatter to add hovertext
             hovertext = [s[2], shapes_data[i+1][2]]
@@ -491,40 +311,6 @@ def create_shapes(shapes_data, y_value, ref_axis):
     return [shapes_traces, hidden_traces]
 
 
-def add_plots_titles(plotly_fig):
-    """
-    """
-
-    annotations_topy = plotly_fig.get_subplot(5, 1).yaxis.domain[1]
-    annotations_boty = plotly_fig.get_subplot(5, 1).yaxis.domain[0]
-    annotations_y = annotations_topy + (annotations_topy-annotations_boty) / 2.5
-
-    plotly_fig.add_annotation(x=0, xref='paper', xanchor='left',
-                              y=annotations_y, yref='paper',
-                              yanchor='bottom',
-                              text='<b>Depth per position</b>',
-                              showarrow=False,
-                              font=dict(size=18))
-
-    plotly_fig.add_annotation(x=0.805, xref='paper', xanchor='left',
-                              y=annotations_y, yref='paper',
-                              yanchor='middle',
-                              text='<b>Depth values<br>distribution (log)</b>',
-                              showarrow=False,
-                              font=dict(size=18))
-    
-    plotly_fig.add_annotation(x=0.905, xref='paper', xanchor='left',
-                              y=annotations_y, yref='paper',
-                              yanchor='middle',
-                              text='<b>Missing intervals</b>',
-                              showarrow=False,
-                              font=dict(size=18))
-
-    return plotly_fig
-
-
-# def add_summary_text(plotly_fig, total_baits, initial_baits, bait_size,
-#                      bait_offset, iter_baits, total_height):
 def add_summary_text():
     """
     """
@@ -539,31 +325,6 @@ The report has the following sections:
 
 If you have any question or wish to report an issue, please go to proBait\'s [GitHub](https://github.com/rfm-targa/proBait) repo.
 """
-
-#     summary_text = """Quas *diva coeperat usum*; suisque, ab alii, prato. Et cornua frontes puerum,
-# referam vocassent **umeris**. Dies nec suorum alis adstitit, *temeraria*,
-# anhelis aliis lacunabant quoque adhuc spissatus illum refugam perterrita in
-# sonus. Facturus ad montes victima fluctus undae Zancle et nulli; frigida me.
-# Regno memini concedant argento Aiacis terga, foribusque audit Persephone
-# serieque, obsidis cupidine qualibet Exadius.
-
-# ```python
-# utf_torrent_flash = -1;
-# urlUpnp -= leakWebE - dslam;
-# skinCdLdap += sessionCyberspace;
-# var ascii = address - software_compile;
-# webFlaming(cable, pathIllegalHtml);```
-
-# ## Quo exul exsecrere cuique non alti caerulaque
-
-# *Optatae o*! Quo et callida et caeleste amorem: nocet recentibus causamque.
-
-# - Voce adduntque
-# - Divesque quam exstinctum revulsus
-# - Et utrique eunti
-# - Vos tantum quercum fervet et nec
-# - Eris pennis maneas quam
-# """
 
     summary_text = dp.Text(summary_text)
 
