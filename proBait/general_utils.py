@@ -506,9 +506,11 @@ def get_baits_pos(baits_fasta, short_ids):
     baits_pos = {s: {} for s in short_ids.values()}
     for rec in baits_records:
         genome = (rec.id).split('_')[0]
-        pos = (rec.id).split('_')[-1]
-        contig = (rec.id).split('_{0}'.format(pos))[0]
-        baits_pos[genome].setdefault(contig, []).append(pos)
+        # some baits will not match an input genome if users provide a set baits
+        if genome in baits_pos:
+            pos = (rec.id).split('_')[-1]
+            contig = (rec.id).split('_{0}'.format(pos))[0]
+            baits_pos[genome].setdefault(contig, []).append(pos)
 
     return baits_pos
 

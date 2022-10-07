@@ -71,18 +71,13 @@ def missing_intervals_hists(depth_values):
     return tracers
 
 
-def depth_lines(depth_values, ordered_contigs, missing_files):
+def depth_lines(depth_values, ordered_contigs):
     """
     """
 
     shapes = {}
     tracers = {}
     for k, v in depth_values.items():
-        # get uncovered intervals in the first iteration
-        uncovered_file = [f for f in missing_files if k in f][0]
-        with open(uncovered_file, 'rb') as infile:
-            miss_regions = pickle.load(infile)
-
         # order contigs based on decreasing length
         contig_order = {}
         for e in ordered_contigs[k]:
@@ -100,26 +95,8 @@ def depth_lines(depth_values, ordered_contigs, missing_files):
         # but plots will be 1-based
         cumulative_pos = 1
         for p, c in contig_order.items():
-            # get missing intervals for contig
-            miss = miss_regions[p]
             # switch to 1-based coordinates for contigs
             contig_pos = 1
-            # create line tracers for missing intervals in first iteration
-            # coordinates are 0-based and need to be incremented to
-            # get 1-based coordinates
-            # create 2 tracers, one for the start coordinates and
-            # another for the stop coordinates
-            starts = []
-            starts_hovertext = []
-            stops = []
-            stops_hovertext = []
-            for m in miss:
-                # cumulative position already includes +1
-                starts.append(cumulative_pos+m[0])
-                # add +1 to start to get 1-based coordinates
-                starts_hovertext.append(str(m[0]+1))
-                stops.append(cumulative_pos+m[1]-1)
-                stops_hovertext.append(str(m[1]))
 
             # group depth values into groups of equal sequential values
             values_groups = [list(j) for i, j in groupby(c[0].values())]
@@ -161,12 +138,6 @@ def coverage_table(initial2_data, final2_data, ref_ids, nr_contigs):
     """
     """
 
-    header_values = ['Sample', 'Number of contigs', 'Total length',
-                     'Initial breadth of coverage', 'Covered bases',
-                     'Uncovered bases', 'Generated probes',
-                     'Final breadth of coverage', 'Covered bases',
-                     'Uncovered bases', 'Mean depth of coverage']
-
     samples = [k+' (ref)'
                if k in ref_ids
                else k
@@ -174,11 +145,15 @@ def coverage_table(initial2_data, final2_data, ref_ids, nr_contigs):
     inputs_contigs = [v[0] for k, v in nr_contigs.items()]
     total_lengths = [v[2] for k, v in nr_contigs.items()]
 
-    initial_cov = [round(initial2_data[k][0], 4) for k in nr_contigs]
-    initial_covered = [initial2_data[k][1] for k in nr_contigs]
-    initial_uncovered = [initial2_data[k][2] for k in nr_contigs]
+    # initial_cov = [round(initial2_data[k][0], 4) for k in nr_contigs]
+    # initial_covered = [initial2_data[k][1] for k in nr_contigs]
+    # initial_uncovered = [initial2_data[k][2] for k in nr_contigs]
 
-    generated_probes = [initial2_data[k][3] for k in nr_contigs]
+    # is None when user does not want to generate probes
+    if initial2_data is not None:
+        generated_probes = [initial2_data[k][3] for k in nr_contigs]
+    else:
+        generated_probes = [0 for k in nr_contigs]
 
     final_cov = [round(final2_data[k][0], 4) for k in nr_contigs]
     final_covered = [final2_data[k][1] for k in nr_contigs]
@@ -193,21 +168,17 @@ def coverage_table(initial2_data, final2_data, ref_ids, nr_contigs):
         mean = round(depth_sum/length, 4)
         mean_depth.append(mean)
 
-    cells_values = [samples, inputs_contigs, total_lengths, initial_cov,
-                    initial_covered, initial_uncovered, generated_probes,
-                    final_cov, final_covered, final_uncovered, mean_depth]
-
     data = {'Sample': samples,
             'Number of contigs': inputs_contigs,
             'Total length': total_lengths,
-            'Initial breadth of coverage': initial_cov,
-            'Initial covered bases': initial_covered,
-            'Initial uncovered bases': initial_uncovered,
-            'Generated probes': generated_probes,
-            'Final breadth of coverage': final_cov,
-            'Final covered bases': final_covered,
-            'Final uncovered bases': final_uncovered,
-            'Mean depth of coverage': mean_depth}
+            'Breadth of coverage': final_cov,
+            'Covered bases': final_covered,
+            'Uncovered bases': final_uncovered,
+            'Mean depth of coverage': mean_depth,
+            # 'Initial breadth of coverage': initial_cov,
+            # 'Initial covered bases': initial_covered,
+            # 'Initial uncovered bases': initial_uncovered,
+            'Generated probes': generated_probes}
 
     coverage_df = pd.DataFrame(data)
 

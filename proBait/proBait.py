@@ -6,7 +6,9 @@
 
 
 import os
+import sys
 import csv
+import shutil
 import argparse
 
 import pandas as pd
@@ -351,7 +353,7 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
 # total_baits = nr_baits+total
 def create_report(configs, initial_data, final_data, ref_set,
                   nr_contigs, ordered_contigs,
-                  missing_files, baits_pos, total_baits):
+                  baits_pos, total_baits):
     """
     """
 
@@ -378,23 +380,24 @@ def create_report(configs, initial_data, final_data, ref_set,
     # depth of coverage per position
     line_tracers, shapes = ru.depth_lines({k: v[3]
                                            for k, v in final_data.items()},
-                                          ordered_contigs, missing_files)
+                                          ordered_contigs)#, missing_files)
 
     figs = {}
     for k, v in line_tracers.items():
         fig = go.Figure(data=[*v])
         figs[k] = fig
-        figs[k].update_layout(title='Depth per position',
+        figs[k].update_layout(title=dict(text='Depth of coverage per position', font_size=20),
                               paper_bgcolor='rgba(255, 255, 255, 0)',
                               plot_bgcolor='#F3F4F6',
                               hovermode='closest',
                               xaxis=dict(showgrid=False, showline=True,
-                                         title='Position', rangeslider=dict(visible=True),
+                                         title=dict(text='Genome position', font_size=18, standoff=5),
+                                         rangeslider=dict(visible=True, range=[1, max(figs[k].data[0].x)]),
                                          # control plot are that is shown, only show area with data points
                                          range=[1, max(figs[k].data[0].x)]),
                               yaxis=dict(showgrid=False, showline=True,
-                                         title='Depth'),
-                              margin=dict(l=30, r=30, t=30, b=30),
+                                         title=dict(text='Depth of coverage', font_size=18, standoff=5)),
+                              margin=dict(l=30, r=30, t=30, b=40),
                               template='ggplot2',
                               font_family='sans-serif')
 
@@ -420,15 +423,15 @@ def create_report(configs, initial_data, final_data, ref_set,
     hist_figs = {}
     for k in hist_tracers:
         hist_figs[k] = go.Figure(data=hist_tracers[k])
-        hist_figs[k].update_layout(title='Depth values distribution',
+        hist_figs[k].update_layout(title=dict(text='Depth of coverage distribution', font_size=20),
                                    bargap=0.10,
                                    paper_bgcolor='rgba(255, 255, 255, 0)',
                                    plot_bgcolor='#F3F4F6',
                                    hovermode='closest',
                                    xaxis=dict(showgrid=True, automargin=True,
-                                              showline=True, title=dict(text='Depth', standoff=5)),
+                                              showline=True, title=dict(text='Depth of coverage', font_size=18, standoff=5)),
                                    yaxis=dict(type='log', showgrid=True, automargin=True,
-                                              showline=True, title=dict(text='Count', standoff=5)),
+                                              showline=True, title=dict(text='Count', font_size=18, standoff=5)),
                                    margin=dict(l=30, r=30, t=30, b=30),
                                    template='ggplot2',
                                    font_family='sans-serif')
@@ -436,23 +439,23 @@ def create_report(configs, initial_data, final_data, ref_set,
     miss_figs = {}
     for k in missing_intervals_hists_tracers:
         miss_figs[k] = go.Figure(data=missing_intervals_hists_tracers[k])
-        miss_figs[k].update_layout(title='Missing intervals distribution',
+        miss_figs[k].update_layout(title=dict(text='Uncovered region size distribution', font_size=20),
                                    bargap=0.10,
                                    paper_bgcolor='rgba(255, 255, 255, 0)',
                                    plot_bgcolor='#F3F4F6',
                                    hovermode='closest',
                                    xaxis=dict(showgrid=True, automargin=True,
-                                              showline=True, title=dict(text='Interval size', standoff=5)),
+                                              showline=True, title=dict(text='Region size', font_size=18, standoff=5)),
                                    yaxis=dict(type='log', automargin=True,
                                               showgrid=True, showline=True,
-                                              title=dict(text='Count', standoff=5)),
+                                              title=dict(text='Count', font_size=18, standoff=5)),
                                    margin=dict(l=30, r=30, t=30, b=30),
                                    template='ggplot2',
                                    font_family='sans-serif')
 
     # create big number objects for summary stats page
     total_bn = dp.BigNumber(heading='Total baits', value=total_baits)
-    mean_coverage_bn = dp.BigNumber(heading='Mean coverage', value=round(coverage_df['Final breadth of coverage'].mean(), 3))
+    mean_coverage_bn = dp.BigNumber(heading='Mean coverage', value=round(coverage_df['Breadth of coverage'].mean(), 3))
     mean_depth_bn = dp.BigNumber(heading='Mean depth', value=round(coverage_df['Mean depth of coverage'].mean(), 3))
 
     # create Group objects for Depth page
@@ -461,7 +464,7 @@ def create_report(configs, initial_data, final_data, ref_set,
         depth_groups.append(
             dp.Group(
                 dp.Group(
-                    dp.BigNumber(heading='Mean coverage', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Final breadth of coverage'].tolist()[0]),
+                    dp.BigNumber(heading='Mean coverage', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Breadth of coverage'].tolist()[0]),
                     dp.BigNumber(heading='Mean depth', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Mean depth of coverage'].tolist()[0]),
                     dp.BigNumber(heading='Generated probes', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Generated probes'].tolist()[0]),
                     columns=3
@@ -508,9 +511,12 @@ def write_tsv_output(baits_file, output_file):
 
 input_files = 'assemblies'
 output_directory = 'bait_generation'
+generate_baits = False
+#baits = None
+baits = '/home/rmamede/Desktop/rmamede/Cloned_Repos/proBait/proBait/unique_baits.fasta'
 bait_size = 120
 bait_offset = 60
-refs = 'refs.txt'
+refs = None
 bait_identity = 0.85
 bait_coverage = 0.9
 minimum_region = 60
@@ -523,14 +529,11 @@ exclude_regions = None
 exclude_pident = 0.5
 exclude_coverage = 0.6
 threads = 4
-fixed_xaxis = True
-fixed_yaxis = True
 report = True
 report_identities = [0.95]
 report_coverages = [0.95]
 tsv_output = True
 
-# determine length of subsequences with 0 coverage and etc
 # number of SNPs, deletions, insertions and etc
 # final table with number of uncovered regions per sample, number of SNPs, number of deletions, insertions, etc.
 
@@ -544,8 +547,6 @@ tsv_output = True
 
 # option to receive baits as input and add more baits generated based on input genomes
 
-# add boxplot with distribution of identity values for mapped baits against each genome
-
 # color baits according to feature that led to bait creation (insertion, deletion, etc)
 
 # plot with markers representing baits should also have the following lines:
@@ -557,82 +558,107 @@ tsv_output = True
 # info somehow...). Adding these lines should not increase report file size
 # that much because each interval will only have 2 points to represent
 # accepted baits, refused baits or uncovered regions.
-def main(input_files, output_directory, mode, minimum_sequence_length,
-         refs, bait_size, bait_offset,
+def main(input_files, output_directory, generate_baits, baits, bait_proportion,
+         refs, minimum_sequence_length, bait_size, bait_offset,
          bait_identity, bait_coverage, minimum_region, minimum_exact_match,
          cluster_probes, cluster_identity, cluster_coverage,
          exclude_regions, exclude_pident, exclude_coverage, threads,
-         report, report_identities, report_coverages, fixed_xaxis,
-         fixed_yaxis, tsv_output):
+         report, report_identities, report_coverages, tsv_output):
+
+    if generate_baits is False and baits is None:
+        print('Please provide the "--generate-baits" argument to '
+              'generate baits from input genomes or/and provide a '
+              'path to a FASTA file with a set of baits.')
+        sys.exit()
+    elif generate_baits is False and baits is not None:
+        if report is False:
+            print('Provided set of baits but does not want to '
+                  'generate new baits based on the input genomes '
+                  'nor map the baits to generate a report. Exiting.')
+            sys.exit()
 
     # create output directory if it does not exist
     exists = gu.create_directory(output_directory)
 
+    baits_file = os.path.join(output_directory, 'baits.fasta')
+    if baits is not None:
+        shutil.copy(baits, baits_file)
+        # count number of baits provided
+        user_baits = len([r.id for r in SeqIO.parse(baits_file, 'fasta')])
+    else:
+        user_baits = 0
+
     # get absolute paths for all input files
     genomes = gu.absolute_paths(input_files)
-
-    # read file with references basenames
-    with open(refs, 'r') as infile:
-        ref_set = [g[0] for g in list(csv.reader(infile, delimiter='\t'))]
-        ref_set = [os.path.join(input_files, g) for g in ref_set]
-
-    # reorder genome list
-    genomes = ref_set + [g for g in genomes if g not in ref_set]
-
     # attribute shorter and unique identifiers to each input
     short_samples = gu.common_suffixes(genomes)
-    inv_short = {v: k for k, v in short_samples.items()}
-
-    ref_set = [short_samples[g] for g in ref_set]
-
     # determine number of sequences and total length per input file
     nr_contigs = {short_samples[f]: gu.count_contigs(f, minimum_sequence_length)
                   for f in genomes}
 
-    # shred refs to get initial set of baits
-    # not generating kmers that cover the end of the sequences!
-    baits_file = os.path.join(output_directory, 'baits.fasta')
-    for g in ref_set:
-        nr_baits = gu.generate_baits(inv_short[g], baits_file, bait_size,
-                                     bait_offset, minimum_sequence_length)
+    if generate_baits is True:
+        # read file with references basenames
+        if refs is not None:
+            with open(refs, 'r') as infile:
+                ref_set = [g[0] for g in list(csv.reader(infile, delimiter='\t'))]
+                ref_set = [os.path.join(input_files, g) for g in ref_set]
+        elif refs is None and baits is None:
+            ref_set = [genomes[0]]
+        else:
+            ref_set = []
 
-    print('\nCreated initial set of {0} probes based on {1} '
-          'inputs.'.format(nr_baits, len(ref_set)))
+        # shred refs to get initial set of baits
+        # does not generate some baits to cover sequence ends
+        if len(ref_set) > 0:
+            for g in ref_set:
+                nr_baits = gu.generate_baits(g, baits_file, bait_size,
+                                             bait_offset, minimum_sequence_length)
 
-    # identify unique baits
-    unique_baits = os.path.join(output_directory, 'unique_baits.fasta')
-    total, unique_seqids = gu.determine_distinct(baits_file, unique_baits)
-    print('Removed {0} repeated probes.\n'.format(total))
+            print('\nGenerated set of {0} probes based on {1} reference '
+                  'inputs.'.format(nr_baits, len(ref_set)))
 
-    # start mapping baits against remaining genomes
-    # mapping against ref_set to cover missing regions
-    bait_creation_dir = os.path.join(output_directory, 'incremental_bait_creation')
-    exists = gu.create_directory(bait_creation_dir)
-
-    total = 0
-    coverage_info = {}
-    discarded_baits_files = []
-    missing_files = []
-    processed = 0
-    for g in genomes:
-        generated = incremental_bait_generator(g, unique_baits,
-                                               bait_creation_dir, bait_size,
-                                               bait_coverage, bait_identity,
-                                               bait_offset, minimum_region,
-                                               nr_contigs, short_samples,
-                                               minimum_exact_match,
-                                               generate=True, depth=False)
-        coverage_info[short_samples[g]] = generated[0]
-        discarded_baits_files.append(generated[2])
-        missing_files.append(generated[3])
-        total += generated[1]
-        processed += 1
-        print('\r', 'Generated baits for {0}/{1} '
-              'inputs.'.format(processed, len(genomes)), end='')
-
-    print('\nAdded {0} probes to cover {1} assemblies.\nTotal '
-          'of {2} probes.'.format(total, len(genomes),
-                                  nr_baits+total))
+        # identify unique baits
+        unique_baits = os.path.join(output_directory, 'unique_baits.fasta')
+        total, unique_seqids = gu.determine_distinct(baits_file, unique_baits)
+        print('Removed {0} repeated probes.\n'.format(total))
+    
+        # start mapping baits against remaining genomes
+        # maps against reference inputs to cover missing regions at contig ends
+        bait_creation_dir = os.path.join(output_directory, 'incremental_bait_creation')
+        exists = gu.create_directory(bait_creation_dir)
+    
+        total = 0
+        coverage_info = {}
+        discarded_baits_files = []
+        #missing_files = []
+        processed = 0
+        for g in genomes:
+            generated = incremental_bait_generator(g, unique_baits,
+                                                   bait_creation_dir, bait_size,
+                                                   bait_coverage, bait_identity,
+                                                   bait_offset, minimum_region,
+                                                   nr_contigs, short_samples,
+                                                   minimum_exact_match,
+                                                   generate=True, depth=False)
+            coverage_info[short_samples[g]] = generated[0]
+            if g in ref_set:
+                coverage_info[short_samples[g]][3] += nr_baits
+            discarded_baits_files.append(generated[2])
+            #missing_files.append(generated[3])
+            total += generated[1]
+            processed += 1
+            print('\r', 'Generated baits for {0}/{1} '
+                  'inputs.'.format(processed, len(genomes)), end='')
+    
+        print('\nAdded {0} probes to cover {1} assemblies.\nTotal '
+              'of {2} probes.'.format(total, len(genomes),
+                                      nr_baits+total))
+    else:
+        unique_baits = baits_file
+        coverage_info = None
+        nr_baits = 0
+        ref_set = []
+        total = 0
 
     if cluster_probes is True:
         clustering_dir = os.path.join(output_directory, 'clustering')
@@ -679,12 +705,16 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
         # create dict with config values
         configs = {'Number of inputs': len(genomes),
                    'Minimum sequence length': minimum_sequence_length,
-                   'Number of references': len(ref_set),
                    'Bait size': bait_size,
                    'Bait offset': bait_offset,
                    'Bait identity': bait_identity,
                    'Bait coverage': bait_coverage,
                    'Minimum exact match': minimum_exact_match}
+
+        if refs is not None:
+            configs['Number of references'] = len(ref_set)
+        else:
+            configs['Number of references'] = 'NA'
 
         configs['Cluster probes'] = str(cluster_probes)
         if cluster_probes is True:
@@ -710,7 +740,6 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
 
             final_info = {}
             discarded_baits_files = []
-            #missing_files = []
             processed = 0
             for g in genomes:
                 generated = incremental_bait_generator(g, unique_baits,
@@ -722,7 +751,6 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
                                                        generate=False, depth=True)
                 final_info[short_samples[g]] = generated[0]
                 discarded_baits_files.append(generated[2])
-                #missing_files.append(generated[3])
                 processed += 1
                 print('\r', 'Evaluated coverage for {0}/{1} '
                       'inputs with bait_identity={2} and '
@@ -737,7 +765,7 @@ def main(input_files, output_directory, mode, minimum_sequence_length,
             depth_files = [mu.write_depth(k, v[3], depth_files_dir) for k, v in final_info.items()]
 
             test_report = create_report(configs, coverage_info, final_info, ref_set, nr_contigs,
-                                        ordered_contigs, missing_files, baits_pos, nr_baits+total)
+                                        ordered_contigs, baits_pos, nr_baits+total+user_baits)
 
             report_html = os.path.join(output_directory,
                                        'proBait_report_idnt{0}_cov{1}.html'.format(configs['Report bait identity'],
@@ -767,11 +795,24 @@ def parse_arguments():
                              'files will be saved to (must not exist, '
                              'process will create this directory).')
 
-    parser.add_argument('-m', '--mode', type=str, required=False,
-                        choices=['inclusive', 'exclusive'],
-                        default='inclusive',
-                        dest='mode',
+    parser.add_argument('-gb', '--generate-baits', required=False,
+                        action='store_true', dest='generate_baits',
                         help='')
+
+    parser.add_argument('-b', '--baits', type=str,
+                        required=False, dest='baits',
+                        help='')
+
+    parser.add_argument('-bp', '--bait-proportion', type=str,
+                        required=False, dest='bait_proportion',
+                        help='')
+
+    parser.add_argument('-rf', '--refs', type=str,
+                        required=False,
+                        dest='refs',
+                        help='Path to file with the basename of files '
+                             'that will be used as references to create '
+                             'the initial set of probes.')
 
     parser.add_argument('-mcl', '--minimum-sequence-length', type=int,
                         required=False, default=0,
@@ -780,13 +821,6 @@ def parse_arguments():
                              'not be created for sequences with a '
                              'length value that is smaller than '
                              'this value.')
-
-    parser.add_argument('-rf', '--refs', type=str,
-                        required=True,
-                        dest='refs',
-                        help='Path to file with the basename of files '
-                             'that will be used as references to create '
-                             'the initial set of probes.')
 
     parser.add_argument('-bs', '--bait-size', type=int,
                         required=False,
@@ -912,16 +946,6 @@ def parse_arguments():
                         dest='report_coverages',
                         help='')
 
-    parser.add_argument('-fx', '--fixed-xaxis', required=False,
-                        action='store_true',
-                        dest='fixed_xaxis',
-                        help='')
-
-    parser.add_argument('-fy', '--fixed-yaxis', required=False,
-                        action='store_true',
-                        dest='fixed_yaxis',
-                        help='')
-    
     parser.add_argument('-tsv', '--tsv-output', required=False,
                         action='store_true',
                         dest='tsv_output',
