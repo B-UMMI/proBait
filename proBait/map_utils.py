@@ -133,7 +133,7 @@ def determine_depth_coverage(intervals, total_len):
     return [positions_depth, counts]
 
 
-def single_position_coverage(coverage_info, start):
+def single_position_coverage(coverage_info, start, count):
     """ Determine if positions in a subsequence are
         covered based on information in the cs field
         in a PAF file created by minimpa2.
@@ -159,8 +159,8 @@ def single_position_coverage(coverage_info, start):
     for m in coverage_info:
         # subsequence part with exact matches
         if m[0] == ':':
-            # create dctionary entries with coverage = 1
-            new_cov = {i: 1 for i in range(start, start+int(m[1:]))}
+            # create dctionary entries with coverage = count
+            new_cov = {i: count for i in range(start, start+int(m[1:]))}
             coverage = {**coverage, **new_cov}
             # increment start position
             start = start + int(m[1:])

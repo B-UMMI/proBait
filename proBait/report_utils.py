@@ -18,6 +18,20 @@ from plotly.offline import plot
 from plotly.subplots import make_subplots
 
 
+def bait_count(counts):
+    """
+    """
+
+    tracer = go.Bar(x=list(counts.keys()),
+                    y=list(counts.values()),
+                    marker=dict(color='rgba(180, 202, 224, 0.7)',
+                                line_color='#045a8d',
+                                line_width=1.5),
+                    showlegend=False)
+
+    return tracer
+
+
 def depth_hists(depth_values):
     """
     """

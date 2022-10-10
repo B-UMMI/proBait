@@ -10,6 +10,7 @@ import sys
 import csv
 import shutil
 import argparse
+from collections import Counter
 
 import pandas as pd
 from Bio import SeqIO
@@ -29,11 +30,25 @@ import general_utils as gu
 
 # dp.enable_logging()
 
+# fasta_input= genomes[0]
+# unique_baits = unique_baits
+# output_dir = final_coverage_dir
+# bait_size = bait_size
+# bait_coverage = report_coverages[i]
+# bait_identity = v
+# bait_offset = bait_offset
+# minimum_region = minimum_region
+# nr_contigs = nr_contigs
+# short_samples = short_samples
+# minimum_exact_match = 0
+# bait_counts = bait_counts
+# generate=False
+# depth=True
 def incremental_bait_generator(fasta_input, unique_baits, output_dir,
                                bait_size, bait_coverage, bait_identity,
                                bait_offset, minimum_region, nr_contigs,
                                short_samples, minimum_exact_match,
-                               generate=False, depth=False):
+                               bait_counts, generate=False, depth=False):
     """
     """
 
@@ -151,9 +166,14 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir,
         current = valid_pident[i][-1]
         # get alignment start position in target
         start = int(valid_pident[i][7])
+        # get bait count to adjust depth of coverage
+        if bait_counts is not None:
+            current_count = bait_counts.get(valid_pident[i][0], 1)
+        else:
+            current_count = 1
         # determine if bait covers all positions in the alignment
         ### Check if coverage determination for deletions and insertions is well defined
-        valid_pident[i].append(mu.single_position_coverage(current, start))
+        valid_pident[i].append(mu.single_position_coverage(current, start, current_count))
 
     # identify subsequences that are well covered by baits
     # covered regions by target sequence
@@ -353,7 +373,7 @@ def exclude_contaminant(unique_baits, exclude_regions, exclude_pident,
 # total_baits = nr_baits+total
 def create_report(configs, initial_data, final_data, ref_set,
                   nr_contigs, ordered_contigs,
-                  baits_pos, total_baits):
+                  baits_pos, total_baits, bait_counts):
     """
     """
 
@@ -458,6 +478,30 @@ def create_report(configs, initial_data, final_data, ref_set,
     mean_coverage_bn = dp.BigNumber(heading='Mean coverage', value=round(coverage_df['Breadth of coverage'].mean(), 3))
     mean_depth_bn = dp.BigNumber(heading='Mean depth', value=round(coverage_df['Mean depth of coverage'].mean(), 3))
 
+    # create bait count histogram
+    if bait_counts is not None:
+        counted = len(bait_counts)
+        counts = Counter(list(bait_counts.values()))
+        not_counted = total_baits - counted
+        counts.update({1:not_counted})
+    else:
+        counts = {1: total_baits}
+
+    counts_tracer = ru.bait_count(counts)
+    counts_fig = go.Figure(data=counts_tracer)
+    counts_fig.update_layout(title=dict(text='Bait count distribution', font_size=20),
+                             bargap=0.10,
+                             paper_bgcolor='rgba(255, 255, 255, 0)',
+                             plot_bgcolor='#F3F4F6',
+                             hovermode='closest',
+                             xaxis=dict(showgrid=True, automargin=True,
+                                        showline=True, title=dict(text='Count', font_size=18, standoff=5)),
+                             yaxis=dict(type='log', showgrid=True, automargin=True,
+                                          showline=True, title=dict(text='Number of distinct baits', font_size=18, standoff=5)),
+                             margin=dict(l=30, r=30, t=30, b=30),
+                             template='ggplot2',
+                             font_family='sans-serif')
+
     # create Group objects for Depth page
     depth_groups = []
     for k in figs:
@@ -484,6 +528,7 @@ def create_report(configs, initial_data, final_data, ref_set,
         dp.Page(title='Summary', blocks=[
                                     dp.Group(summary_text, parameter_table, columns=2),
                                     dp.Group(total_bn, mean_coverage_bn, mean_depth_bn, columns=3),
+                                    counts_fig,
                                     coverage_table]
                 ),
         dp.Page(title='Coverage analysis', blocks=[
@@ -513,7 +558,9 @@ input_files = 'assemblies'
 output_directory = 'bait_generation'
 generate_baits = False
 #baits = None
-baits = '/home/rmamede/Desktop/rmamede/Cloned_Repos/proBait/proBait/unique_baits.fasta'
+baits = '/home/rmamede/Desktop/rmamede/Cloned_Repos/proBait/proBait/bait_counts.fasta'
+bait_proportion = '/home/rmamede/Desktop/rmamede/Cloned_Repos/proBait/proBait/bait_counts_test.tsv'
+#bait_proportion = None
 bait_size = 120
 bait_offset = 60
 refs = None
@@ -588,6 +635,13 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
     else:
         user_baits = 0
 
+    # read file with bait proportion
+    if bait_proportion is not None:
+        bait_counts = gu.read_tabular(bait_proportion)
+        bait_counts = {line[0]:int(line[1]) for line in bait_counts}
+    else:
+        bait_counts = None
+
     # get absolute paths for all input files
     genomes = gu.absolute_paths(input_files)
     # attribute shorter and unique identifiers to each input
@@ -597,7 +651,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
                   for f in genomes}
 
     if generate_baits is True:
-        # read file with references basenames
+        # read file with reference basenames
         if refs is not None:
             with open(refs, 'r') as infile:
                 ref_set = [g[0] for g in list(csv.reader(infile, delimiter='\t'))]
@@ -630,7 +684,6 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
         total = 0
         coverage_info = {}
         discarded_baits_files = []
-        #missing_files = []
         processed = 0
         for g in genomes:
             generated = incremental_bait_generator(g, unique_baits,
@@ -638,13 +691,12 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
                                                    bait_coverage, bait_identity,
                                                    bait_offset, minimum_region,
                                                    nr_contigs, short_samples,
-                                                   minimum_exact_match,
+                                                   minimum_exact_match, None,
                                                    generate=True, depth=False)
             coverage_info[short_samples[g]] = generated[0]
             if g in ref_set:
                 coverage_info[short_samples[g]][3] += nr_baits
             discarded_baits_files.append(generated[2])
-            #missing_files.append(generated[3])
             total += generated[1]
             processed += 1
             print('\r', 'Generated baits for {0}/{1} '
@@ -747,7 +799,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
                                                        bait_size, report_coverages[i],
                                                        v, bait_offset, minimum_region,
                                                        nr_contigs, short_samples,
-                                                       0,
+                                                       0, bait_counts,
                                                        generate=False, depth=True)
                 final_info[short_samples[g]] = generated[0]
                 discarded_baits_files.append(generated[2])
@@ -765,7 +817,8 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
             depth_files = [mu.write_depth(k, v[3], depth_files_dir) for k, v in final_info.items()]
 
             test_report = create_report(configs, coverage_info, final_info, ref_set, nr_contigs,
-                                        ordered_contigs, baits_pos, nr_baits+total+user_baits)
+                                        ordered_contigs, baits_pos, nr_baits+total+user_baits,
+                                        bait_counts)
 
             report_html = os.path.join(output_directory,
                                        'proBait_report_idnt{0}_cov{1}.html'.format(configs['Report bait identity'],
