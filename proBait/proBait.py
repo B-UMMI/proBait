@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+Purpose
+-------
 
+This is the main module of proBait.
+
+Code documentation
+------------------
 """
 
 
