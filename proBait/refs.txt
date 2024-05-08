@@ -1,1 +1,0 @@
-2001V1210S.contigs.length_GCcontent_kmerCov.mappingCov.polished.fasta

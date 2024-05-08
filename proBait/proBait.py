@@ -534,7 +534,7 @@ def create_report(configs, initial_data, final_data, ref_set,
         dp.Page(title='Coverage analysis', blocks=[
                                     dp.Select(blocks=depth_groups, type=dp.SelectType.DROPDOWN)]
                 ),
-        layout=dp.PageLayout.SIDE
+        #layout=dp.PageLayout.SIDE
         )
 
     return report
@@ -823,10 +823,10 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
             report_html = os.path.join(output_directory,
                                        'proBait_report_idnt{0}_cov{1}.html'.format(configs['Report bait identity'],
                                                                                    configs['Report bait coverage']))
-            test_report.save(path=report_html,
-                             formatting=dp.ReportFormatting(
-                                 font=dp.FontChoice.SANS,
-                                 width=dp.ReportWidth.FULL))
+            test_report.save(path=report_html)#,
+                            #  formatting=dp.ReportFormatting(
+                            #      font=dp.FontChoice.SANS,
+                            #      width=dp.ReportWidth.FULL))
 
             print('\nCoverage report for bait_identity={0} and '
                   'bait_coverage={1} available in {2}'.format(v, report_coverages[i], report_dir))
