@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: If you use proBait in your research, please cite it using these metadata.
+title: proBait
+abstract: Generate target-enrichment probes from a set of genome assemblies.
+authors:
+  - family-names: Mamede
+    given-names: Rafael
+  - family-names: Ramirez
+    given-names: Mário
+version: 0.1.0
+date-released: "2024-05-08"
+keywords:
+  - bioinformatics
+  - genomics 
+  - target capture
+  - target-enrichment
+license: GPL-3.0
+repository-code: "https://github.com/B-UMMI/proBait" 
+contact:
+  - email: imm-bioinfo@medicina.ulisboa.pt
+    name: "Molecular Microbiology and Infection Unit (UMMI), Instituto de Medicina Molecular João Lobo Antunes, Faculdade de Medicina, Universidade de Lisboa"

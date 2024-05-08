@@ -1,0 +1,4 @@
+biopython>=1.83
+plotly>=5.22.0
+pandas>=1.5.3
+datapane>=0.17.0

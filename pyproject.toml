@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proBait"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "biopython>=1.83",
+    "plotly>=5.22.0",
+    "pandas>=1.5.3",
+    "datapane>=0.17.0",
+]
+authors = [
+    {name = "Rafael Mamede"},
+    {name = "Mário Ramirez"}
+]
+maintainers = [
+  {name = "UMMI", email = "imm-bioinfo@medicina.ulisboa.pt"}
+]
+description = "Generate target-enrichment probes from a set of genome assemblies."
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = [
+    "bioinformatics",
+    "genomics",
+    "target capture",
+    "target-enrichment",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Natural Language :: English",
+    "Operating System :: Unix",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.scripts]
+"proBait" = "proBait.proBait:main"
+
+[project.urls]
+Repository = "https://github.com/B-UMMI/proBait"
+Documentation = ""
+Changelog = "https://github.com/B-UMMI/proBait/blob/master/CHANGELOG.md"
