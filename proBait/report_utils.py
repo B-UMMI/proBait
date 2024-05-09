@@ -26,12 +26,12 @@ except:
 def bait_count(counts):
     """
     """
-
     tracer = go.Bar(x=list(counts.keys()),
                     y=list(counts.values()),
-                    marker=dict(color='rgba(180, 202, 224, 0.7)',
-                                line_color='#045a8d',
-                                line_width=1.5),
+                    marker={'color': 'rgba(180, 202, 224, 0.7)',
+                            'line_color': '#045a8d',
+                            'line_width': 1.5
+                            },
                     showlegend=False)
 
     return tracer
@@ -40,7 +40,6 @@ def bait_count(counts):
 def depth_hists(depth_values):
     """
     """
-
     tracers = {}
     for k, v in depth_values.items():
         x_values = list(v.values())
@@ -49,9 +48,10 @@ def depth_hists(depth_values):
                         y=x_values,
                         hovertemplate=('<b>Coverage:<b> %{x}'
                                        '<br><b>Number of pos.:<b> %{y}'),
-                        marker=dict(color='rgba(180, 202, 224, 0.7)',
-                                    line_color='#045a8d',
-                                    line_width=1.5),
+                        marker={'color': 'rgba(180, 202, 224, 0.7)',
+                                'line_color': '#045a8d',
+                                'line_width': 1.5
+                                },
                         showlegend=False)
         tracers[k] = tracer
 
@@ -61,7 +61,6 @@ def depth_hists(depth_values):
 def missing_intervals_hists(depth_values):
     """
     """
-
     tracers = {}
     for k, v in depth_values.items():
         current_counts = {}
@@ -80,9 +79,10 @@ def missing_intervals_hists(depth_values):
                              y=y_values,
                              hovertemplate=('<b>Interval size:<b> %{x}'
                                             '<br><b>Count:<b> %{y}'),
-                             marker=dict(color='rgba(180, 202, 224, 0.7)',
-                                         line_color='#045a8d',
-                                         line_width=1.5),
+                             marker={'color': 'rgba(180, 202, 224, 0.7)',
+                                     'line_color': '#045a8d',
+                                     'line_width': 1.5
+                                     },
                              showlegend=False)
 
         tracers[k] = hist_tracer
@@ -93,7 +93,6 @@ def missing_intervals_hists(depth_values):
 def depth_lines(depth_values, ordered_contigs):
     """
     """
-
     shapes = {}
     tracers = {}
     for k, v in depth_values.items():
@@ -146,7 +145,9 @@ def depth_lines(depth_values, ordered_contigs):
                                              '<br><b>Coverage:<b> %{y}'),
                               showlegend=False,
                               mode='lines',
-                              line=dict(color='#045a8d', width=0.5),
+                              line={'color': '#045a8d',
+                                    'width': 0.5
+                                    },
                               fill='tozeroy')
         tracers[k].append(tracer)
 
@@ -156,7 +157,6 @@ def depth_lines(depth_values, ordered_contigs):
 def coverage_table(initial2_data, final2_data, ref_ids, nr_contigs):
     """
     """
-
     samples = [k+' (ref)'
                if k in ref_ids
                else k
@@ -201,23 +201,26 @@ def coverage_table(initial2_data, final2_data, ref_ids, nr_contigs):
 
     coverage_df = pd.DataFrame(data)
 
-    coverage_table = dp.DataTable(coverage_df)
+    table = dp.DataTable(coverage_df)
 
-    return [coverage_table, coverage_df]
+    return [table, coverage_df]
 
 
 def create_shape(xref, yref, xaxis_pos, yaxis_pos,
                  line_width=1, dash_type='dashdot'):
     """
     """
-
-    shape_tracer = dict(type='line',
-                        xref=xref,
-                        yref=yref,
-                        x0=xaxis_pos[0], x1=xaxis_pos[1],
-                        y0=yaxis_pos[0], y1=yaxis_pos[1],
-                        line=dict(width=line_width,
-                                  dash=dash_type))
+    shape_tracer = {'type': 'line',
+                    'xref': xref,
+                    'yref': yref,
+                    'x0': xaxis_pos[0],
+                    'x1': xaxis_pos[1],
+                    'y0': yaxis_pos[0],
+                    'y1': yaxis_pos[1],
+                    'line': {'width': line_width,
+                             'dash': dash_type
+                             }
+                    }
 
     return shape_tracer
 
@@ -225,7 +228,6 @@ def create_shape(xref, yref, xaxis_pos, yaxis_pos,
 def baits_tracer(data, ordered_contigs):
     """
     """
-
     # add baits scatter
     baits_x = []
     baits_y = []
@@ -244,9 +246,12 @@ def baits_tracer(data, ordered_contigs):
 
         start += contig[1]
 
-    tracer = go.Scattergl(x=baits_x, y=baits_y,
+    tracer = go.Scattergl(x=baits_x,
+                          y=baits_y,
                           mode='markers',
-                          marker=dict(size=4, color='#41ab5d'),
+                          marker={'size': 4,
+                                  'color': '#41ab5d'
+                                  },
                           showlegend=False,
                           text=baits_labels,
                           hovertemplate=('<b>Contig pos.:<b> %{text}'
@@ -259,11 +264,11 @@ def baits_tracer(data, ordered_contigs):
 def create_scatter(x_values, y_values, mode, hovertext):
     """
     """
-
-    tracer = go.Scattergl(x=x_values, y=y_values,
+    tracer = go.Scattergl(x=x_values,
+                          y=y_values,
                           mode=mode,
                           #line=dict(color='black'),
-                          line=dict(color='rgba(147,112,219,0.1)'),
+                          line={'color': 'rgba(147,112,219,0.1)'},
                           showlegend=False,
                           text=hovertext,
                           hovertemplate=('%{text}'),
@@ -275,7 +280,6 @@ def create_scatter(x_values, y_values, mode, hovertext):
 def create_shapes(shapes_data, y_value):
     """
     """
-
     shapes_traces = []
     hidden_traces = []
     for i, s in enumerate(shapes_data):
@@ -304,7 +308,6 @@ def create_shapes(shapes_data, y_value):
 def add_summary_text():
     """
     """
-
     summary_text = dp.Text(ct.summary_text)
 
     return summary_text

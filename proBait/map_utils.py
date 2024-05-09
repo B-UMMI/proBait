@@ -25,7 +25,7 @@ except:
     import proBait.general_utils as gu
 
 
-def run_minimap2(reference, map_fasta, output_file):
+def run_minimap2(reference, map_fasta, output_file, threads):
     """Execute minimap2 to map sequences to a genome.
 
     Parameters
@@ -48,8 +48,8 @@ def run_minimap2(reference, map_fasta, output_file):
     """
     # -I parameter to control number of target bases loaded into memory
     # --secondary=yes to output secondary alignments that might have high score
-    minimap_args = ['minimap2 -I 100M --cs -cx sr --secondary=yes {0} {1} > '
-                    '{2}'.format(reference, map_fasta, output_file)]
+    minimap_args = ['minimap2 -I 100M --cs -cx sr --secondary=yes -t {3} {0} {1} > '
+                    '{2}'.format(reference, map_fasta, output_file, threads)]
 
     minimap_proc = subprocess.Popen(minimap_args,
                                     shell=True,
