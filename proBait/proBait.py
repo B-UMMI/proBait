@@ -40,7 +40,7 @@ except ModuleNotFoundError:
 	from proBait import general_utils as gu
 
 
-def incremental_bait_generator(fasta_input, unique_baits, output_dir,
+def incremental_bait_generator(fasta_input, baits_file, output_dir,
 							   bait_size, bait_coverage, bait_identity,
 							   bait_offset, minimum_region, nr_contigs,
 							   short_samples, minimum_exact_match,
@@ -58,7 +58,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir,
 	total_bases = nr_contigs[short_id][2]
 
 	# Run minimap2 to map baits against input
-	minimap_std = mu.run_minimap2(fasta_input, unique_baits, paf_path, threads)
+	minimap_std = mu.run_minimap2(fasta_input, baits_file, paf_path, threads)
 
 	# Read PAF file
 	# PAF file has variabe number of fields, only the first 12 fields are always present
@@ -222,7 +222,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir,
 
 		# Get sequences of all baits
 		baits_seqs = [str(rec.seq)
-					  for rec in SeqIO.parse(unique_baits, 'fasta')]
+					  for rec in SeqIO.parse(baits_file, 'fasta')]
 
 		# Create fasta strings
 		extra_baits = {}
@@ -238,7 +238,7 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir,
 
 		# Avoid adding newline if there are no baits
 		if len(new_baits_lines) > 0:
-			gu.write_lines(new_baits_lines, unique_baits)
+			gu.write_lines(new_baits_lines, baits_file)
 
 		coverage_info.append(len(new_baits_lines))
 		total += len(new_baits_lines)
@@ -261,15 +261,14 @@ def incremental_bait_generator(fasta_input, unique_baits, output_dir,
 	return [coverage_info, total, discarded_file, missing_file]
 
 
-def exclude_similar_baits(unique_baits, clustering_dir, cluster_identity,
-						   cluster_coverage, bait_size, threads):
+def exclude_similar_baits(baits_file, clustering_dir, cluster_identity,
+						  cluster_coverage, bait_size, threads):
 	"""
 	"""
-	print('Clustering baits...')
 	# Cluster baits and remove based on similarity threshold
 	# Create database
 	mmseqs_db = os.path.join(clustering_dir, 'mmseqs_db')
-	mmseqs_std = cu.create_mmseqs_db(unique_baits, mmseqs_db)
+	mmseqs_std = cu.create_mmseqs_db(baits_file, mmseqs_db)
 
 	# Output paths
 	cluster_db = os.path.join(clustering_dir, 'clusters')
@@ -309,28 +308,26 @@ def exclude_similar_baits(unique_baits, clustering_dir, cluster_identity,
 			   for k, v in clusters.items()]
 	exclude = gu.flatten_list(exclude)
 	excluded_seqids = [e[0] for e in exclude]
-	print('Excluded {0} baits similar to other baits.'.format(len(excluded_seqids)))
 
 	# Create FASTA without excluded baits
-	baits = gu.import_sequences(unique_baits)
+	baits = gu.import_sequences(baits_file)
 	baits = {k: v for k, v in baits.items() if k not in excluded_seqids}
 
 	baits_records = ['>{0}\n{1}'.format(k, v) for k, v in baits.items()]
-	filtered_baits = os.path.join(clustering_dir, 'filtered_baits')
-	gu.write_lines(baits_records, filtered_baits)
+	singular_baits = os.path.join(clustering_dir, 'singular_baits')
+	gu.write_lines(baits_records, singular_baits)
 
-	return [filtered_baits, excluded_seqids]
+	return [singular_baits, excluded_seqids]
 
 
-def exclude_contaminant(unique_baits, exclude, exclude_pident,
+def exclude_contaminant(baits_file, exclude, exclude_pident,
 						exclude_coverage, bait_size, output_dir, threads):
 	"""
 	"""
-	print('Mapping against and removing similar baits...')
-	# Map against target genome that baits should not be specific for
+	# Map against target sequences that baits should not be specific for
 	gbasename = os.path.basename(exclude).split('.fna')[0]
 	paf_path = os.path.join(output_dir, gbasename+'.paf')
-	minimap_std = mu.run_minimap2(exclude, unique_baits, paf_path, threads)
+	minimap_std = mu.run_minimap2(exclude, baits_file, paf_path, threads)
 
 	# Import mapping results
 	mapped_baits = gu.read_tabular(paf_path)
@@ -343,19 +340,16 @@ def exclude_contaminant(unique_baits, exclude, exclude_pident,
 	multispecific_baits = list(set(multispecific_baits))
 
 	# Remove baits and write final probe set
-	baits = gu.import_sequences(unique_baits)
+	baits = gu.import_sequences(baits_file)
 	baits = {k: v
 			 for k, v in baits.items()
 			 if k not in multispecific_baits}
 
-	print('Removed {0} baits similar with contaminant '
-		  'genome.'.format(len(multispecific_baits)))
-
 	baits_records = ['>{0}\n{1}'.format(k, v) for k, v in baits.items()]
-	final_baits = os.path.join(output_dir, 'final_baits.fasta')
-	gu.write_lines(baits_records, final_baits)
+	decontaminated_baits = os.path.join(output_dir, 'decontaminated_baits.fasta')
+	gu.write_lines(baits_records, decontaminated_baits)
 
-	return [final_baits, multispecific_baits]
+	return [decontaminated_baits, multispecific_baits]
 
 
 def create_report(configs, initial_data, final_data, ref_set,
@@ -672,8 +666,8 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 
 		# Identify unique baits
 		print('Identifying duplicated baits...')
-		unique_baits = os.path.join(output_directory, 'baits.fasta')
-		total, unique_seqids = gu.determine_distinct(initial_baits_file, unique_baits)
+		baits_file = os.path.join(output_directory, 'baits.fasta')
+		total, unique_seqids = gu.determine_distinct(initial_baits_file, baits_file)
 		print(f'Removed {total} duplicated baits.')
 
 		# Map baits against remaining input sequences
@@ -687,7 +681,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 		processed = 0
 		print('Mapping baits against inputs and generating new baits for uncovered regions...')
 		for g in genomes:
-			generated = incremental_bait_generator(g, unique_baits,
+			generated = incremental_bait_generator(g, baits_file,
 												   bait_creation_dir, bait_size,
 												   bait_coverage, bait_identity,
 												   bait_offset, minimum_region,
@@ -705,36 +699,47 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 		print(f'\nGenerated {total} new baits for uncovered regions.')
 		print(f'Total of {nr_baits+total} baits.')
 	else:
-		unique_baits = os.path.join(output_directory, 'baits.fasta')
-		shutil.copy(initial_baits_file, unique_baits)
+		baits_file = os.path.join(output_directory, 'baits.fasta')
+		shutil.copy(initial_baits_file, baits_file)
 		coverage_info = None
 		nr_baits = 0
 		ref_set = []
 		total = 0
 
 	if cluster is True:
+		print(f'Clustering baits to remove baits based on identity={cluster_identity} and coverage={cluster_coverage}...')
 		clustering_dir = os.path.join(output_directory, 'clustering')
 		exists = gu.create_directory(clustering_dir)
-		unique_baits, removed = exclude_similar_baits(unique_baits,
-													   clustering_dir,
-													   cluster_identity,
-													   cluster_coverage,
-													   bait_size,
-													   threads)
+		singular_baits, removed = exclude_similar_baits(baits_file,
+													    clustering_dir,
+													    cluster_identity,
+													    cluster_coverage,
+													    bait_size,
+													    threads)
+		print(f'Excluded {len(removed)} baits similar to other baits.')
+		# Delete FASTA file with non-decontaminated baits
+		os.remove(baits_file)
+		# Move and rename FASTA file with decontaminated baits
+		shutil.move(singular_baits, baits_file)
 		total -= len(removed)
 
-	# Need to copy the Fasta file without the excluded baits to the main output directory!
 	exclude_stats = 'None'
 	if exclude is not None:
+		print(f'Mapping against {exclude} to remove similar baits...')
 		exclude_dir = os.path.join(output_directory, 'exclude')
 		exists = gu.create_directory(exclude_dir)
-		unique_baits, removed = exclude_contaminant(unique_baits,
-													exclude,
-													exclude_pident,
-													exclude_coverage,
-													bait_size,
-													exclude_dir,
-													threads)
+		decontaminated_baits, removed = exclude_contaminant(baits_file,
+															exclude,
+															exclude_pident,
+															exclude_coverage,
+															bait_size,
+															exclude_dir,
+															threads)
+		print(f'Removed {len(removed)} baits similar to sequences in {exclude}.')
+		# Delete FASTA file with non-decontaminated baits
+		os.remove(baits_file)
+		# Move and rename FASTA file with decontaminated baits
+		shutil.move(decontaminated_baits, baits_file)
 		# Determine number of exclude regions and total bps
 		exclude_stats = [len(rec)
 						 for rec in SeqIO.parse(exclude, 'fasta')]
@@ -744,7 +749,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 	# Create TSV output with bait identifier and bait sequence columns
 	if tsv_output is True:
 		tsv_output_file = os.path.join(output_directory, 'baits.tsv')
-		tsv_baits = write_tsv_output(unique_baits, tsv_output_file)
+		tsv_baits = write_tsv_output(baits_file, tsv_output_file)
 		print(f'Wrote {tsv_baits} baits to {tsv_output_file}')
 
 	if report is True:
@@ -780,7 +785,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 			configs['Exclusion coverage'] = exclude_coverage
 
 		# Get bait positions
-		baits_pos = gu.get_baits_pos(unique_baits, short_samples)
+		baits_pos = gu.get_baits_pos(baits_file, short_samples)
 
 		# Create a report for each report identity and coverage pair
 		print('Evaluating the performance of the set of baits and generating interactive reports...')
@@ -802,7 +807,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 			discarded_baits_files = []
 			processed = 0
 			for g in genomes:
-				generated = incremental_bait_generator(g, unique_baits,
+				generated = incremental_bait_generator(g, baits_file,
 													   final_coverage_dir,
 													   bait_size, current_coverage,
 													   current_identity, bait_offset, minimum_region,
@@ -840,6 +845,10 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 	# Initial bait set
 	os.remove(initial_baits_file)
 	gu.delete_directories([bait_creation_dir, report_dir]+coverage_dirs+depth_dirs)
+	if exclude:
+		gu.delete_directories([exclude_dir])
+	if cluster:
+		gu.delete_directories([clustering_dir])
 
 	print(f'Created a total of {nr_baits+total} baits to cover {len(genomes)} inputs.')
 	print(f'Results available in {output_directory}')
