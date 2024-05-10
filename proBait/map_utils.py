@@ -4,7 +4,7 @@
 Purpose
 -------
 
-This module contains functions used to map probes against sequences with
+This module contains functions used to map baits against sequences with
 minimap2 and compute coverage statistics.
 
 Code documentation
@@ -258,12 +258,12 @@ def determine_interval_baits(bait_size, bait_offset, start, stop, total_len):
 
     Returns
     -------
-    probes : list of list
+    baits : list of list
         List with one sublist per determined bait.
         Each sublist has the start and stop position
         for a bait.
     """
-    probes = []
+    baits = []
     reach = False
     while reach is False:
         # Remaining interval has length equal or greater than bait size
@@ -275,9 +275,9 @@ def determine_interval_baits(bait_size, bait_offset, start, stop, total_len):
         elif (start + bait_size) < stop:
             bait_interval = [start, start+bait_size]
             start = start + bait_offset
-        probes.append(bait_interval)
+        baits.append(bait_interval)
 
-    return probes
+    return baits
 
 
 def merge_intervals(intervals):
@@ -324,7 +324,7 @@ def merge_intervals(intervals):
 
 
 def determine_missing_intervals(intervals, identifier, total_len):
-    """Determine sequence intervals that are not covered by any probes.
+    """Determine sequence intervals that are not covered by any baits.
 
     Parameters
     ----------
@@ -346,9 +346,9 @@ def determine_missing_intervals(intervals, identifier, total_len):
             Dictionary with sequence identifiers as keys
             a list of lists as values. Each sublist has
             the start and stop positions for a sequence
-            interval that is not covered by probes.
+            interval that is not covered by baits.
         not_covered : int
-            Total number of bases not covered by probes.
+            Total number of bases not covered by baits.
     """
     start = 0
     not_covered = 0
@@ -424,7 +424,7 @@ def cover_intervals(intervals, total_len, bait_size,
                 # Do not subtract offset if it leads to negative position
                 if bait_offset < bait_size and (start-bait_offset) >= 0:
                     start -= bait_offset
-                probes = determine_interval_baits(bait_size, bait_offset, start, stop, total_len)
-                cover_baits.extend(probes)
+                baits = determine_interval_baits(bait_size, bait_offset, start, stop, total_len)
+                cover_baits.extend(baits)
 
     return cover_baits

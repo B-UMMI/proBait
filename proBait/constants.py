@@ -9,7 +9,11 @@ Code documentation
 """
 
 
-summary_text = """# proBait report
+AUTHORS = 'Rafael Mamede, Mário Ramirez'
+REPOSITORY = 'https://github.com/B-UMMI/proBait'
+CONTACTS = 'imm-bioinfo@medicina.ulisboa.pt'
+
+SUMMARY_TEXT = """# proBait report
 
 The report has the following sections:
 - **Configuration**: values passed to proBait\'s parameters.
