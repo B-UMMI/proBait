@@ -1,2 +1,2 @@
 # proBait
-Generate target-enrichment probes from a set of prokaryotic genome assemblies.
+Generate target-enrichment baits from a set of genome assemblies.
