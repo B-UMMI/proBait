@@ -1023,11 +1023,9 @@ def parse_arguments():
 							 'includes the bait DNA sequence).')
 
 	args = parser.parse_args()
-
-	return args
+	main(**vars(args))
 
 
 if __name__ == '__main__':
 
-	args = parse_arguments()
-	main(**vars(args))
+	parse_arguments()
