@@ -36,7 +36,8 @@ def delete_directories(directory_list):
 	"""
 	"""
 	for directory in directory_list:
-		shutil.rmtree(directory)
+		if os.path.isdir(directory):
+			shutil.rmtree(directory)
 
 
 def absolute_paths(directory_path):
@@ -447,7 +448,7 @@ def regex_matcher(string, pattern):
 	return matches
 
 
-def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
+def generate_baits(fasta, output_file, bait_size, bait_offset, min_len, sample_id):
 	"""Generate baits for sequences in a FASTA file.
 
 	Parameters
@@ -474,7 +475,7 @@ def generate_baits(fasta, output_file, bait_size, bait_offset, min_len):
 	kmers = {cid: sequence_kmerizer(seq, bait_size, offset=bait_offset, position=True)
 			 for cid, seq in sequences.items() if len(seq) >= min_len}
 
-	baits = [['>{0}_{1}\n{2}'.format(k, e[1], e[0])
+	baits = [[f'>{sample_id}|{k}|{e[1]}\n{e[0]}'
 			  for e in v] for k, v in kmers.items()]
 	baits = flatten_list(baits)
 
@@ -489,12 +490,10 @@ def get_baits_pos(baits_fasta, short_ids):
 	baits_records = SeqIO.parse(baits_fasta, 'fasta')
 	baits_pos = {s: {} for s in short_ids.values()}
 	for rec in baits_records:
-		genome = (rec.id).split('_')[0]
-		# some baits will not match an input genome if users provide a set baits
+		genome, contig, position = (rec.id).split('|')
+		# Some baits will not match an input genome if users provide a set baits
 		if genome in baits_pos:
-			pos = (rec.id).split('_')[-1]
-			contig = (rec.id).split('_{0}'.format(pos))[0]
-			baits_pos[genome].setdefault(contig, []).append(pos)
+			baits_pos[genome].setdefault(contig, []).append(position)
 
 	return baits_pos
 

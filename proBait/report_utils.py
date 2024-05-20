@@ -280,26 +280,28 @@ def create_scatter(x_values, y_values, mode, hovertext):
 def create_shapes(shapes_data, y_value):
 	"""
 	"""
+	# y_step = int(y_value/4) if int(y_value/4) > 0 else 1
+	# hidden_ticks = list(range(1, y_value, y_step))
+	hidden_ticks = list(range(1, y_value+1))
+	# if y_value not in hidden_ticks:
+	# 	hidden_ticks += [y_value]
+
 	shapes_traces = []
 	hidden_traces = []
-	for i, s in enumerate(shapes_data):
-		# do not create line for last contig
-		if s != shapes_data[-1]:
-			# only create tracer for end position
-			# start position is equal to end position of previous contig
-			shape_tracer = create_shape('x', 'y', [s[1], s[1]], [0, y_value])
-			shapes_traces.append(shape_tracer)
-			# create invisible scatter to add hovertext
-			hovertext = [s[2], shapes_data[i+1][2]]
-			hover_str = '<b><--{0}<b><br><b>{1}--><b>'.format(*hovertext)
-			y_step = int(y_value/4) if int(y_value/4) > 0 else 1
-			hidden_ticks = list(range(1, y_value, y_step))
-			if y_value not in hidden_ticks:
-				hidden_ticks += [y_value]
+	# Do not create line for last contig or if there is only one contig
+	for i, s in enumerate(shapes_data[:-1]):
+		# if s != shapes_data[-1]:
+		# Only create tracer for end position
+		# Start position is equal to end position of previous contig
+		shape_tracer = create_shape('x', 'y', [s[1], s[1]], [0, y_value])
+		shapes_traces.append(shape_tracer)
+		# Create invisible scatter to add hovertext
+		hovertext = [s[2], shapes_data[i+1][2]]
+		hover_str = '<b><--{0}<b><br><b>{1}--><b>'.format(*hovertext)
 		hidden_tracer = create_scatter([s[1]]*len(hidden_ticks),
-									   hidden_ticks,
-									   mode='lines',
-									   hovertext=[hover_str]*y_value)
+									hidden_ticks,
+									mode='lines',
+									hovertext=[hover_str]*y_value)
 		hidden_traces.append(hidden_tracer)
 
 	return [shapes_traces, hidden_traces]

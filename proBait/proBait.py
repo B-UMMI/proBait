@@ -228,7 +228,7 @@ def incremental_bait_generator(fasta_input, baits_file, output_dir,
 		extra_baits = {}
 		for k, v in missing_baits_intervals.items():
 			# Check if new baits are not equal to reverse complement of previous baits
-			extra_baits[k] = list(set(['>{0}_{1}\n{2}'.format(k, e[0], contigs[k][e[0]:e[1]])
+			extra_baits[k] = list(set([f'>{short_id}|{k}|{e[0]}\n{contigs[k][e[0]:e[1]]}'
 										for e in v
 										if contigs[k][e[0]:e[1]] not in baits_seqs
 										and gu.reverse_complement(contigs[k][e[0]:e[1]]) not in baits_seqs]))
@@ -417,7 +417,7 @@ def create_report(configs, initial_data, final_data, ref_set,
 	for k, v in baits_tracers.items():
 		figs[k].add_trace(v)
 
-	# Areate shapes for contig boundaries
+	# Create shapes for contig boundaries
 	for k, v in shapes.items():
 		y_value = max(figs[k].data[0].y)
 		shapes_tracers, hidden_tracers = ru.create_shapes(list(shapes[k]), y_value)
@@ -425,7 +425,7 @@ def create_report(configs, initial_data, final_data, ref_set,
 		# Add shapes for contig boundaries
 		figs[k].update_layout(shapes=shapes_tracers, clickmode='event')
 
-		# Add hidden tracers to display contig boundaries hover
+		# Add hidden traces to display contig boundaries hover
 		for t in hidden_tracers:
 			figs[k].add_trace(t)
 
@@ -644,6 +644,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 	nr_contigs = {short_samples[f]: gu.count_contigs(f, minimum_sequence_length)
 				  for f in genomes}
 
+	nr_baits = 0
 	if generate_baits is True:
 		# Read file with reference basenames
 		if refs is not None:
@@ -657,25 +658,30 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 
 		# Shred references to generate initial set of baits
 		# Does not cover sequence ends
+		refs_baits = {}
 		if len(ref_set) > 0:
 			print('Shredding references to generate initial set of baits...')
 			for g in ref_set:
-				nr_baits = gu.generate_baits(g, initial_baits_file, bait_size,
-											 bait_offset, minimum_sequence_length)
+				ref_baits = gu.generate_baits(g, initial_baits_file, bait_size,
+											 bait_offset, minimum_sequence_length,
+											 short_samples[g])
+				refs_baits[g] = ref_baits
+				nr_baits += ref_baits
 			print(f'Generated {nr_baits} baits based on {len(ref_set)} reference/s.')
 
 		# Identify unique baits
 		print('Identifying duplicated baits...')
 		baits_file = os.path.join(output_directory, 'baits.fasta')
-		total, unique_seqids = gu.determine_distinct(initial_baits_file, baits_file)
-		print(f'Removed {total} duplicated baits.')
+		total_duplicated, unique_seqids = gu.determine_distinct(initial_baits_file, baits_file)
+		print(f'Removed {total_duplicated} duplicated baits.')
+		nr_baits -= total_duplicated
 
 		# Map baits against remaining input sequences
 		# Maps against references to cover missing regions at contig ends
 		bait_creation_dir = os.path.join(output_directory, 'incremental_bait_creation')
 		exists = gu.create_directory(bait_creation_dir)
 
-		total = 0
+		novel_baits = 0
 		coverage_info = {}
 		discarded_baits_files = []
 		processed = 0
@@ -690,21 +696,22 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 												   threads, generate=True, depth=False)
 			coverage_info[short_samples[g]] = generated[0]
 			if g in ref_set:
-				coverage_info[short_samples[g]][3] += nr_baits
+				coverage_info[short_samples[g]][3] += refs_baits[g]
 			discarded_baits_files.append(generated[2])
-			total += generated[1]
+			novel_baits += generated[1]
 			processed += 1
 			print('\r', f'Mapped baits against {processed}/{len(genomes)} inputs.', end='')
 
-		print(f'\nGenerated {total} new baits for uncovered regions.')
-		print(f'Total of {nr_baits+total} baits.')
+		nr_baits += novel_baits
+
+		print(f'\nGenerated {novel_baits} new baits for uncovered regions.')
+		print(f'Total of {nr_baits} baits.')
 	else:
 		baits_file = os.path.join(output_directory, 'baits.fasta')
 		shutil.copy(initial_baits_file, baits_file)
 		coverage_info = None
 		nr_baits = 0
 		ref_set = []
-		total = 0
 
 	if cluster is True:
 		print(f'Clustering baits to remove baits based on identity={cluster_identity} and coverage={cluster_coverage}...')
@@ -721,7 +728,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 		os.remove(baits_file)
 		# Move and rename FASTA file with decontaminated baits
 		shutil.move(singular_baits, baits_file)
-		total -= len(removed)
+		nr_baits -= len(removed)
 
 	exclude_stats = 'None'
 	if exclude is not None:
@@ -744,7 +751,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 		exclude_stats = [len(rec)
 						 for rec in SeqIO.parse(exclude, 'fasta')]
 		exclude_stats = len(exclude_stats)
-		total -= len(removed)
+		nr_baits -= len(removed)
 
 	# Create TSV output with bait identifier and bait sequence columns
 	if tsv_output is True:
@@ -828,7 +835,7 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 			depth_files = [mu.write_depth(k, v[3], depth_files_dir) for k, v in final_info.items()]
 
 			test_report = create_report(configs, coverage_info, final_info, ref_set, nr_contigs,
-										ordered_contigs, baits_pos, nr_baits+total+user_baits,
+										ordered_contigs, baits_pos, nr_baits+user_baits,
 										bait_counts)
 
 			report_html = os.path.join(output_directory,
@@ -844,13 +851,16 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 	# Delete intermediate files
 	# Initial bait set
 	os.remove(initial_baits_file)
-	gu.delete_directories([bait_creation_dir, report_dir]+coverage_dirs+depth_dirs)
+	if generate_baits:
+		gu.delete_directories([bait_creation_dir])
+	if report:
+		gu.delete_directories([report_dir]+coverage_dirs+depth_dirs)
 	if exclude:
 		gu.delete_directories([exclude_dir])
 	if cluster:
 		gu.delete_directories([clustering_dir])
 
-	print(f'Created a total of {nr_baits+total} baits to cover {len(genomes)} inputs.')
+	print(f'Created a total of {nr_baits} baits to cover {len(genomes)} inputs.')
 	print(f'Results available in {output_directory}')
 
 
