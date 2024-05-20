@@ -4,7 +4,7 @@
 Purpose
 -------
 
-This is the main module of proBait.
+Generate baits for target capture experiments.
 
 Code documentation
 ------------------

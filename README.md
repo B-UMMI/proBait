@@ -1,6 +1,6 @@
 # proBait
 
-proBait is a tool for designing baits/probes for target-enrichment/target capture experiments of bacterial pathogens. proBait starts by shredding a set of genome assemblies to create an initial set of baits. This is followed by an iterative mapping approach (that uses minimpa2) in which the initial set of baits is mapped against the input genome assemblies to determine the genomic regions not covered by the baits and generate new baits to cover those regions according to the parameters set by the user.
+proBait is a tool for designing baits/probes for target-enrichment/target capture experiments of bacterial pathogens. proBait starts by shredding a set of genome assemblies to create an initial set of baits. This is followed by an iterative mapping approach (that uses minimap2) in which the initial set of baits is mapped against the input genome assemblies to determine the genomic regions not covered by the baits and generate new baits to cover those regions according to the parameters set by the user.
 
 ## Installation
 
