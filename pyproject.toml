@@ -41,7 +41,7 @@ classifiers = [
 ]
 
 [project.scripts]
-"proBait" = "proBait.proBait:main"
+"proBait" = "proBait.proBait:parse_arguments"
 
 [project.urls]
 Repository = "https://github.com/B-UMMI/proBait"
