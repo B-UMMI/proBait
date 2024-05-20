@@ -1023,6 +1023,13 @@ def parse_arguments():
 							 'includes the bait DNA sequence).')
 
 	args = parser.parse_args()
+
+	# Check minimap2 and MMseqs2
+	minimap2_path = shutil.which('minimap2')
+	mmseqs2_path = shutil.which('mmseqs')
+	if minimap2_path is None or mmseqs2_path is None:
+		sys.exit('Could not find minimap2 or MMseqs2. Please make sure both are installed.')
+
 	main(**vars(args))
 
 
