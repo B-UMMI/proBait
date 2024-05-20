@@ -4,7 +4,37 @@ proBait is a tool for designing baits/probes for target enrichment/target captur
 
 ## Installation
 
+We recommend creating a separate environment to install proBait and its dependencies.
 
+### Pip
+
+```
+pip3 install probait
+```
+
+### Source
+
+Just `cd` into the `proBait` directory after clonning this repository and run:
+
+```
+pip install .
+```
+
+#### Python dependencies
+
+- biopython>=1.83
+- plotly>=5.22.0
+- pandas>=1.5.3
+- datapane>=0.17.0
+
+These dependencies are automatically installed in any of the aforementioned installation methods.
+
+#### Other dependencies
+
+- [minimap2](https://github.com/lh3/minimap2)
+- [MMseqs2](https://github.com/soedinglab/MMseqs2)
+
+These dependencies are not installed automatically. Please install them in the environemnt you are working on.
 
 ## Usage
 
