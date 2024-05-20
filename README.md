@@ -1,6 +1,6 @@
 # proBait
 
-proBait is a tool for designing baits/probes for target enrichment/target capture experiments of bacterial pathogens. proBait starts by shredding a set of genome assemblies to create an initial set of baits. This is followed by an iterative mapping approach (that uses [minimap2](https://github.com/lh3/minimap2)) in which the initial set of baits is mapped against the input genome assemblies to determine the genomic regions not covered by the baits and generate new baits to cover those regions according to the parameters set by the user. proBait also includes options to cluster the generated bait set with [MMseqs2](https://github.com/soedinglab/MMseqs2) to reduce redundancy and the removal of baits that are similar to a host or contaminant by mapping the generated bait set against the host and contaminant sequences.
+proBait is a tool for designing baits/probes for target enrichment/target capture experiments of bacterial pathogens. proBait starts by shredding a set of reference genome assemblies (in FASTA format) to create an initial set of baits. This is followed by an iterative mapping approach (that uses [minimap2](https://github.com/lh3/minimap2)) in which the initial set of baits is mapped against the input genome assemblies to determine the genomic regions not covered by the baits and generate new baits to cover those regions according to the parameters set by the user. proBait also includes options to cluster the generated bait set with [MMseqs2](https://github.com/soedinglab/MMseqs2) to reduce redundancy and the removal of baits that are similar to a host or contaminant by mapping the generated bait set against the host and contaminant sequences.
 
 ## Installation
 
@@ -14,7 +14,7 @@ pip3 install probait
 
 ### Source
 
-Just `cd` into the `proBait` directory after clonning this repository and run:
+Just `cd` into the `proBait` directory after cloning this repository and run:
 
 ```
 pip install .
@@ -34,7 +34,7 @@ These dependencies are automatically installed in any of the aforementioned inst
 - [minimap2](https://github.com/lh3/minimap2)
 - [MMseqs2](https://github.com/soedinglab/MMseqs2)
 
-These dependencies are not installed automatically. Please install them in the environemnt you are working on.
+These dependencies are not installed automatically. Please install them in the environment you are working on.
 
 ## Usage
 
