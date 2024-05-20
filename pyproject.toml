@@ -45,5 +45,5 @@ classifiers = [
 
 [project.urls]
 Repository = "https://github.com/B-UMMI/proBait"
-Documentation = ""
+#Documentation = ""
 Changelog = "https://github.com/B-UMMI/proBait/blob/master/CHANGELOG.md"
