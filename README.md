@@ -1,6 +1,6 @@
 # proBait
 
-proBait is a tool for designing baits/probes for target-enrichment/target capture experiments of bacterial pathogens. proBait starts by shredding a set of genome assemblies to create an initial set of baits. This is followed by an iterative mapping approach (that uses minimap2) in which the initial set of baits is mapped against the input genome assemblies to determine the genomic regions not covered by the baits and generate new baits to cover those regions according to the parameters set by the user.
+proBait is a tool for designing baits/probes for target enrichment/target capture experiments of bacterial pathogens. proBait starts by shredding a set of genome assemblies to create an initial set of baits. This is followed by an iterative mapping approach (that uses [minimap2](https://github.com/lh3/minimap2)) in which the initial set of baits is mapped against the input genome assemblies to determine the genomic regions not covered by the baits and generate new baits to cover those regions according to the parameters set by the user. proBait also includes options to cluster the generated bait set with [MMseqs2](https://github.com/soedinglab/MMseqs2) to reduce redundancy and the removal of baits that are similar to a host or contaminant by mapping the generated bait set against the host and contaminant sequences.
 
 ## Installation
 
@@ -17,7 +17,7 @@ usage: proBait.py [-h] -i INPUT_FILES -o OUTPUT_DIRECTORY [-gb] [-b BAITS] [-bp 
 Purpose
 -------
 
-This is the main module of proBait.
+Generate baits for target capture experiments.
 
 Code documentation
 ------------------
@@ -32,7 +32,7 @@ options:
   -gb, --generate-baits
                         Pass this parameter to generate baits based on the sequences in the input files.
   -b BAITS, --baits BAITS
-                        Path to a FASTA file with a set of baits generated on a previous run.
+                        Path to a FASTA file with baits generated on a previous run.
   -bp BAIT_PROPORTION, --bait-proportion BAIT_PROPORTION
                         Path to a TSV file with data about bait proportion to use when evaluating bait performance and generating the
                         reports.
@@ -57,9 +57,9 @@ options:
                         Minimum number of N sequential matching bases in an alignment to accept it.
   -c, --cluster         Cluster set of baits to remove similar baits and reduce redundancy.
   -ci CLUSTER_IDENTITY, --cluster-identity CLUSTER_IDENTITY
-                        Exclude baits with an identity value to the cluster representative equal or higher than this value.
+                        Exclude baits with an identity value to the cluster representative equal to or higher than this value.
   -cc CLUSTER_COVERAGE, --cluster-coverage CLUSTER_COVERAGE
-                        Exclude baits with a coverage value to the cluster representative equal or higher than this value.
+                        Exclude baits with a coverage value to the cluster representative equal to or higher than this value.
   -e EXCLUDE, --exclude EXCLUDE
                         Path to a FASTA file containing sequences to which baits must not be specific.
   -ep EXCLUDE_PIDENT, --exclude-pident EXCLUDE_PIDENT
@@ -77,7 +77,7 @@ options:
                         List of coverage values used to evaluate bait performance. proBait will generate a report per coverage value. An
                         equal number of identity values must be provided to the --report-identities parameter to pair with the coverage
                         values.
-  -tsv, --tsv-output    Output bait set in TSV format (first column includes the bait sequence identifier and the second column includes
+  -tsv, --tsv-output    Output bait set in TSV format (the first column includes the bait sequence identifier, and the second column includes
                         the bait DNA sequence).
 ```
 
