@@ -43,22 +43,21 @@ except ModuleNotFoundError:
 def incremental_bait_generator(fasta_input, baits_file, output_dir,
 							   bait_size, bait_coverage, bait_identity,
 							   bait_offset, minimum_region, nr_contigs,
-							   short_samples, minimum_exact_match,
-							   bait_counts, threads, generate=False, depth=False):
+							   short_id, minimum_exact_match,
+							   bait_counts, threads, mode, generate=False, depth=False):
 	"""
 	"""
 	total = 0
 	coverage_info = []
 	invalid_mappings = []
 
-	short_id = short_samples[fasta_input]
 	paf_path = os.path.join(output_dir, short_id+'.paf')
 
 	contigs = gu.import_sequences(fasta_input)
 	total_bases = nr_contigs[short_id][2]
 
 	# Run minimap2 to map baits against input
-	minimap_std = mu.run_minimap2(fasta_input, baits_file, paf_path, threads)
+	minimap_std = mu.run_minimap2(fasta_input, baits_file, paf_path, threads, mode)
 
 	# Read PAF file
 	# PAF file has variabe number of fields, only the first 12 fields are always present
@@ -352,7 +351,16 @@ def exclude_contaminant(baits_file, exclude, exclude_pident,
 	return [decontaminated_baits, multispecific_baits]
 
 
-def create_report(configs, initial_data, final_data, ref_set,
+# configs = configs
+# initial_data = coverage_info
+# final_data = final_info
+# ref_set = ref_set
+# nr_contigs = nr_contigs
+# ordered_contigs = ordered_contigs
+# baits_pos = baits_pos
+# total_baits = nr_baits+user_baits
+# bait_counts = bait_counts
+def create_report(configs, initial_data, final_data, files_info, ref_set,
 				  nr_contigs, ordered_contigs,
 				  baits_pos, total_baits, bait_counts):
 	"""
@@ -366,20 +374,26 @@ def create_report(configs, initial_data, final_data, ref_set,
 	parameter_table = dp.Table(config_df)
 
 	# Create coverage table
-	coverage_table, coverage_df = ru.coverage_table(initial_data, final_data, ref_set, nr_contigs)
+	coverage_table, coverage_df = ru.coverage_table(initial_data, final_data, files_info, ref_set, nr_contigs)
 
 	# Depth of coverage values distribution
-	hist_tracers = ru.depth_hists({k: v[4]
-								   for k, v in final_data.items()})
+	hist_tracers = ru.depth_hists({k: v[4] for k, v in final_data.items()})
+
+	# Depth of coverage values distribution for file mapping
+	map_hist_tracers = ru.depth_hists({k: v[4] for k, v in files_info.items()})
 
 	# Missing intervals hist tracers
 	missing_intervals_hists_tracers = ru.missing_intervals_hists({k: v[3]
 																  for k, v in final_data.items()})
 
+	# Missing intervals hist traces for file mapping
+	map_missing_intervals_hists_tracers = ru.missing_intervals_hists({k: v[3]
+																  for k, v in files_info.items()})
+
 	# Depth of coverage per position
 	line_tracers, shapes = ru.depth_lines({k: v[3]
 										   for k, v in final_data.items()},
-										  ordered_contigs)#, missing_files)
+										  ordered_contigs, 1)
 
 	figs = {}
 	for k, v in line_tracers.items():
@@ -416,6 +430,41 @@ def create_report(configs, initial_data, final_data, ref_set,
 					 for k, v in ordered_contigs.items() if k in baits_pos}
 	for k, v in baits_tracers.items():
 		figs[k].add_trace(v)
+
+	# Depth of coverage per position for file mapping
+	map_line_tracers, map_shapes = ru.depth_lines({k: v[3]
+										   for k, v in files_info.items()},
+										  ordered_contigs, 100)
+
+	map_figs = {}
+	for k, v in map_line_tracers.items():
+		fig = go.Figure(data=[*v])
+		map_figs[k] = fig
+		map_figs[k].update_layout(title={'text': 'Depth of coverage per position',
+									 'font_size': 20},
+							  paper_bgcolor='rgba(255, 255, 255, 0)',
+							  plot_bgcolor='#F3F4F6',
+							  hovermode='closest',
+							  xaxis={'showgrid': False, 'showline': True,
+									 'title': {'text': 'Genome position',
+											   'font_size': 18,
+											   'standoff': 5
+											   },
+									 'rangeslider': {'visible': True,
+													 'range': [1, max(map_figs[k].data[0].x)]
+													 },
+									 'range': [1, max(map_figs[k].data[0].x)]
+									 },
+							  yaxis={'showgrid': False,
+									 'showline': True,
+									 'title': {'text': 'Depth of coverage',
+											   'font_size': 18,
+											   'standoff': 5
+											   }
+									 },
+							  margin={'l': 30, 'r': 30, 't': 30, 'b': 40},
+							  template='ggplot2',
+							  font_family='sans-serif')
 
 	# Create shapes for contig boundaries
 	for k, v in shapes.items():
@@ -461,10 +510,73 @@ def create_report(configs, initial_data, final_data, ref_set,
 								   template='ggplot2',
 								   font_family='sans-serif')
 
+	map_hist_figs = {}
+	for k in hist_tracers:
+		map_hist_figs[k] = go.Figure(data=map_hist_tracers[k])
+		map_hist_figs[k].update_layout(title={'text': 'Depth of coverage distribution',
+										  'font_size': 20
+										  },
+								   bargap=0.10,
+								   paper_bgcolor='rgba(255, 255, 255, 0)',
+								   plot_bgcolor='#F3F4F6',
+								   hovermode='closest',
+								   xaxis={'showgrid': True,
+										  'automargin': True,
+										  'showline': True,
+										  'title': {'text': 'Depth of coverage',
+													'font_size': 18,
+													'standoff': 5
+													}
+										  },
+								   yaxis={'type': 'log',
+										  'showgrid': True,
+										  'automargin': True,
+										  'showline': True,
+										  'title': {'text': 'Count',
+													'font_size': 18,
+													'standoff': 5
+													}
+										  },
+								   margin={'l': 30, 'r': 30, 't': 30, 'b': 30},
+								   template='ggplot2',
+								   font_family='sans-serif')
+
+
 	miss_figs = {}
 	for k in missing_intervals_hists_tracers:
 		miss_figs[k] = go.Figure(data=missing_intervals_hists_tracers[k])
 		miss_figs[k].update_layout(title={'text': 'Uncovered region size distribution',
+										  'font_size': 20
+										  },
+								   bargap=0.10,
+								   paper_bgcolor='rgba(255, 255, 255, 0)',
+								   plot_bgcolor='#F3F4F6',
+								   hovermode='closest',
+								   xaxis={'showgrid': True,
+										  'automargin': True,
+										  'showline': True,
+										  'title': {'text': 'Region size',
+													'font_size': 18,
+													'standoff': 5
+													}
+										  },
+								   yaxis={'type': 'log',
+										  'automargin': True,
+										  'showgrid': True,
+										  'showline': True,
+										  'title': {'text': 'Count',
+													'font_size': 18,
+													'standoff': 5
+													}
+										  },
+								   margin={'l': 30, 'r': 30, 't': 30, 'b': 30},
+								   template='ggplot2',
+								   font_family='sans-serif')
+
+	map_miss_figs = {}
+	for k in missing_intervals_hists_tracers:
+		map_miss_figs[k] = go.Figure(data=map_missing_intervals_hists_tracers[k])
+		map_miss_figs[k].update_layout(title={'text': 'Uncovered region size distribution',
 										  'font_size': 20
 										  },
 								   bargap=0.10,
@@ -544,6 +656,7 @@ def create_report(configs, initial_data, final_data, ref_set,
 	for k in figs:
 		depth_groups.append(
 			dp.Group(
+				dp.Text("## Bait coverage"),
 				dp.Group(
 					dp.BigNumber(heading='Mean coverage', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Breadth of coverage'].tolist()[0]),
 					dp.BigNumber(heading='Mean depth', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Mean depth of coverage'].tolist()[0]),
@@ -556,9 +669,29 @@ def create_report(configs, initial_data, final_data, ref_set,
 					dp.Plot(miss_figs[k]),
 					columns=2
 				),
+				dp.Text("## Files coverage"),
+				dp.Group(
+					dp.BigNumber(heading='Mean coverage', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Files breadth of coverage'].tolist()[0]),
+					dp.BigNumber(heading='Mean depth', value=coverage_df[coverage_df['Sample'].str.contains(k)]['Files mean depth of coverage'].tolist()[0]),
+					columns=2
+				),
+				dp.Plot(map_figs[k]),
+				dp.Group(
+					dp.Plot(map_hist_figs[k]),
+					dp.Plot(map_miss_figs[k]),
+					columns=2
+				),
 				label=k,
 			)
 		)
+
+	# dp.Select only works with multiple samples
+	if len(depth_groups) > 1:
+		select_type = dp.Select(blocks=depth_groups, type=dp.SelectType.DROPDOWN)
+		cov_title = 'Coverage analysis'
+	else:
+		select_type = depth_groups[0]
+		cov_title = f'Coverage analysis ({list(nr_contigs.keys())[0]})'
 
 	# Create report object
 	report = dp.Report(
@@ -568,8 +701,7 @@ def create_report(configs, initial_data, final_data, ref_set,
 									counts_fig,
 									coverage_table]
 				),
-		dp.Page(title='Coverage analysis', blocks=[
-									dp.Select(blocks=depth_groups, type=dp.SelectType.DROPDOWN)]
+		dp.Page(title=cov_title, blocks=[select_type]
 				),
 		)
 
@@ -577,7 +709,16 @@ def create_report(configs, initial_data, final_data, ref_set,
 
 
 def write_tsv_output(baits_file, output_file):
-	"""
+	"""Write bait set data to TSV file.
+
+	Parameters
+	----------
+	baits_file : str
+		Path to the FASTA file containing the baits.
+	Returns
+	-------
+	output_file : str
+		Path to the output TSV file.
 	"""
 	baits_records = SeqIO.parse(baits_file, 'fasta')
 	baits_lines = ['{0}\t{1}'.format(rec.id, str(rec.seq))
@@ -589,14 +730,39 @@ def write_tsv_output(baits_file, output_file):
 	return len(baits_lines)
 
 
+input_files = '/home/rmamede/test_proBait/assemblies'
+output_directory = '/home/rmamede/test_proBait/results'
+generate_baits = False
+baits = '/home/rmamede/test_proBait/baits/baits.fasta'
+bait_proportion = None
+refs = None
+minimum_sequence_length = 0
+bait_size = 120
+bait_offset = 60
+bait_identity = 0.95
+bait_coverage = 0.95
+minimum_region = 0
+minimum_exact_match = 40
+cluster = False
+cluster_identity = 1.0
+cluster_coverage = 1.0
+exclude = None
+exclude_pident = 0.7
+exclude_coverage = 0.5
+threads = 10
+report = True
+report_identities = [0.95]
+report_coverages = [0.95]
+map_reads = '/home/rmamede/test_proBait/reads_paths.tsv'
+tsv_output = False
 # Add option to only determine baits for a set of target loci
 # Accept loci annotations and add that info to the coverage per sample pages
 def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 		 refs, minimum_sequence_length, bait_size, bait_offset,
 		 bait_identity, bait_coverage, minimum_region, minimum_exact_match,
-		 cluster, cluster_identity, cluster_coverage,
-		 exclude, exclude_pident, exclude_coverage, threads,
-		 report, report_identities, report_coverages, tsv_output):
+		 cluster, cluster_identity, cluster_coverage, exclude, exclude_pident,
+		 exclude_coverage, threads, report, report_identities, report_coverages,
+		 map_sequences, tsv_output):
 
 	print('proBait version: {0}'.format(__version__))
 	print('Authors: {0}'.format(ct.AUTHORS))
@@ -686,15 +852,15 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 		discarded_baits_files = []
 		processed = 0
 		print('Mapping baits against inputs and generating new baits for uncovered regions...')
-		for g in genomes:
-			generated = incremental_bait_generator(g, baits_file,
+		for g, gid in short_samples.items():
+			generated = incremental_bait_generator(g, [baits_file],
 												   bait_creation_dir, bait_size,
 												   bait_coverage, bait_identity,
 												   bait_offset, minimum_region,
-												   nr_contigs, short_samples,
+												   nr_contigs, gid,
 												   minimum_exact_match, None,
-												   threads, generate=True, depth=False)
-			coverage_info[short_samples[g]] = generated[0]
+												   threads, 'short', generate=True, depth=False)
+			coverage_info[gid] = generated[0]
 			if g in ref_set:
 				coverage_info[short_samples[g]][3] += refs_baits[g]
 			discarded_baits_files.append(generated[2])
@@ -759,6 +925,11 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 		tsv_baits = write_tsv_output(baits_file, tsv_output_file)
 		print(f'Wrote {tsv_baits} baits to {tsv_output_file}')
 
+	# Import file with list of file paths to map against inputs
+	if map_reads is not None:
+		to_map = gu.read_tabular(map_reads, delimiter='\t')
+		to_map = {line[0]: (line[1].split(','),line[2]) for line in to_map}
+
 	if report is True:
 		# Create report directory
 		report_dir = os.path.join(output_directory, 'report_data')
@@ -810,18 +981,19 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 			exists = gu.create_directory(final_coverage_dir)
 			coverage_dirs.append(final_coverage_dir)
 
+			# Map final set of baits to determine coverage
 			final_info = {}
 			discarded_baits_files = []
 			processed = 0
-			for g in genomes:
-				generated = incremental_bait_generator(g, baits_file,
+			for g, gid in short_samples.items():
+				generated = incremental_bait_generator(g, [baits_file],
 													   final_coverage_dir,
 													   bait_size, current_coverage,
 													   current_identity, bait_offset, minimum_region,
-													   nr_contigs, short_samples,
+													   nr_contigs, gid,
 													   0, bait_counts,
-													   threads, generate=False, depth=True)
-				final_info[short_samples[g]] = generated[0]
+													   threads, 'short', generate=False, depth=True)
+				final_info[gid] = generated[0]
 				discarded_baits_files.append(generated[2])
 				processed += 1
 				print('\r', f'Processed {processed}/{len(genomes)} inputs for '
@@ -834,7 +1006,42 @@ def main(input_files, output_directory, generate_baits, baits, bait_proportion,
 			depth_dirs.append(depth_files_dir)
 			depth_files = [mu.write_depth(k, v[3], depth_files_dir) for k, v in final_info.items()]
 
-			test_report = create_report(configs, coverage_info, final_info, ref_set, nr_contigs,
+			# Map FASTQ or FASTA files if user passed TSV file
+			files_info = {}
+			if map_reads:
+				# Create directory to store mapping results for FASTQ/FASTA files
+				files_coverage_dir = os.path.join(output_directory, 'files_coverage_{0}'.format(i))
+				exists = gu.create_directory(files_coverage_dir)
+				coverage_dirs.append(files_coverage_dir)
+
+				# Map FASTQ/FASTA files to determine coverage
+				discarded_files = []
+				files_processed = 0
+				for g, gid in short_samples.items():
+					# Get files to map
+					map_files = to_map[gid][0]
+					mode = to_map[gid][1]
+					generated = incremental_bait_generator(g, map_files,
+														   files_coverage_dir,
+														   bait_size, current_coverage,
+														   current_identity, bait_offset, minimum_region,
+														   nr_contigs, gid,
+														   0, bait_counts,
+														   threads, mode, generate=False, depth=True)
+					files_info[gid] = generated[0]
+					discarded_files.append(generated[2])
+					files_processed += 1
+					print('\r', f'Processed {processed}/{len(genomes)} inputs for '
+						  f'bait_identity={current_identity} and bait_coverage={current_coverage}.', end='')
+
+				# Save depth values
+				depth_mapfiles_dir = os.path.join(output_directory, 'depth_mapfiles_idnt{0}_cov{1}'.format(str(current_identity).replace('.', ''),
+																							   str(current_coverage).replace('.', '')))
+				exists = gu.create_directory(depth_mapfiles_dir)
+				depth_dirs.append(depth_mapfiles_dir)
+				depth_mapfiles = [mu.write_depth(k, v[3], depth_mapfiles_dir) for k, v in files_info.items()]
+
+			test_report = create_report(configs, coverage_info, final_info, files_info, ref_set, nr_contigs,
 										ordered_contigs, baits_pos, nr_baits+user_baits,
 										bait_counts)
 
@@ -871,8 +1078,8 @@ def parse_arguments():
 
 	parser.add_argument('-i', '--input-files', type=str,
 						required=True, dest='input_files',
-						help='Path to the directory that contains the '
-							 'input FASTA files.')
+						help='Path to the directory containing the '
+							 'input FASTA files to generate baits.')
 
 	parser.add_argument('-o', '--output-directory', type=str,
 						required=True, dest='output_directory',
@@ -882,8 +1089,9 @@ def parse_arguments():
 
 	parser.add_argument('-gb', '--generate-baits', action='store_true',
 						required=False, dest='generate_baits',
-						help='Pass this parameter to generate baits '
-							 'based on the sequences in the input files.')
+						help='The process will only generate baits based '
+							 'on the sequences in the input files if this '
+							 'parameter is passed.')
 
 	parser.add_argument('-b', '--baits', type=str,
 						required=False, dest='baits',
@@ -902,10 +1110,10 @@ def parse_arguments():
 							 'FASTA files, one basename per line, that will be '
 							 'used as references to create the initial set of '
 							 'baits. The references are shredded into baits '
-							 'according to the --bait-size and --bait-offset '
+							 'according to the `--bait-size` and `--bait-offset` '
 							 'values.')
 
-	parser.add_argument('-msl', '--minimum-sequence-length', type=int,
+	parser.add_argument('-ml', '--minimum-sequence-length', type=int,
 						required=False, default=0,
 						dest='minimum_sequence_length',
 						help='Do not generate baits for sequences shorter '
@@ -914,9 +1122,9 @@ def parse_arguments():
 	parser.add_argument('-bs', '--bait-size', type=int,
 						required=False, default=120,
 						dest='bait_size',
-						help='The length of the baits in bases. '
-							 'All the baits that are generated during the '
-							 'process have a size equal to the passed value.')
+						help='The length of the baits in bases. All the '
+							 'baits generated during the process have a '
+							 'size equal to the passed value.')
 
 	parser.add_argument('-bo', '--bait-offset', type=int,
 						required=False, default=120,
@@ -940,12 +1148,12 @@ def parse_arguments():
 						required=False, default=0,
 						dest='minimum_region',
 						help='The process will only generate new baits for '
-							 'uncovered regions with length greater than this value.')
+							 'uncovered regions longer than this value.')
 
 	parser.add_argument('-me', '--minimum-exact-match', type=int,
 						required=False, default=0,
 						dest='minimum_exact_match',
-						help='Minimum number of N sequential matching '
+						help='Minimum number of sequential matching '
 							 'bases in an alignment to accept it.')
 
 	parser.add_argument('-c', '--cluster', action='store_true',
@@ -956,48 +1164,44 @@ def parse_arguments():
 	parser.add_argument('-ci', '--cluster-identity', type=float,
 						required=False, default=1.0,
 						dest='cluster_identity',
-						help='Exclude baits with an identity value to '
-							 'the cluster representative equal or higher '
-							 'than this value.')
+						help='Exclude baits with percent identity '
+							 'equal or greater than this value with the '
+							 'cluster representative.')
 
 	parser.add_argument('-cc', '--cluster-coverage', type=float,
 						required=False, default=1.0,
 						dest='cluster_coverage',
-						help='Exclude baits with a coverage value to '
-							 'the cluster representative equal or higher '
+						help='Exclude baits covering a total percent of '
+							 'the cluster representative equal or greater '
 							 'than this value.')
 
 	parser.add_argument('-e', '--exclude', type=str,
 						required=False, default=None,
 						dest='exclude',
 						help='Path to a FASTA file containing sequences '
-							 'to which baits must not be specific.')
+							 'to which baits must not be similar.')
 
 	parser.add_argument('-ep', '--exclude-pident', type=float,
 						required=False, default=0.7,
 						dest='exclude_pident',
-						help='Exclude baits with an identity value to '
-							 'a region of a sequence to exclude equal '
-							 'or higher than this value.')
+						help='Exclude baits with percent identity equal or '
+							 'greater than this value with regions of '
+							 'sequences included in the FASTA file passed '
+							 'to `--exclude`.')
 
 	parser.add_argument('-ec', '--exclude-coverage', type=float,
 						required=False, default=0.5,
 						dest='exclude_coverage',
-						help='Exclude baits with a coverage value to '
-							 'a region of a sequence to exclude equal '
-							 'or higher than this value.')
-
-	parser.add_argument('-t', '--threads', type=int,
-						required=False, default=1,
-						dest='threads',
-						help='Number of threads passed to minimap2 and '
-							 'MMseqs2.')
+						help='Exclude baits with a coverage value equal '
+							 'or greater than this value with regions of '
+							 'sequences included in the FASTA file passed '
+							 'to `--exclude`.')
 
 	parser.add_argument('-r', '--report', action='store_true',
 						required=False, dest='report',
 						help='Evaluate bait performance against input '
 							 'sequences and generate an interactive report '
-							 'with results.')
+							 'to explore results.')
 
 	parser.add_argument('-ri', '--report-identities', type=float, nargs='+',
 						required=False, dest='report_identities',
@@ -1016,19 +1220,43 @@ def parse_arguments():
 							 'values must be provided to the --report-identities '
 							 'parameter to pair with the coverage values.')
 
+	parser.add_argument('-ms', '--map-sequences', type=str, required=False,
+						dest='map_sequences',
+						help='Path to a TSV file with the basenames of input '
+							 'FASTA files in the first column and paths to '
+							 'FASTQ or FASTA files with reads/sequences to '
+							 'map against each input in the second column. '
+							 'A third column must specify the type of file '
+							 'to map. To map short reads, use "short". For '
+							 'paired-end, pass the paths to both files '
+							 'joined by ",". For long read data, pass '
+							 '"long". For contigs pass "contigs".'
+							 'The process evaluates the mapping results and '
+							 'displays them in the report.')
+
 	parser.add_argument('-tsv', '--tsv-output', action='store_true',
 						required=False, dest='tsv_output',
-						help='Output bait set in TSV format (first column includes '
-							 'the bait sequence identifier and the second column '
-							 'includes the bait DNA sequence).')
+						help='Output bait set in TSV format (first column '
+							 'includes the bait sequence identifier and the '
+							 'second column includes the bait DNA sequence).')
+
+	parser.add_argument('-t', '--threads', type=int,
+						required=False, default=1,
+						dest='threads',
+						help='Number of threads passed to minimap2 and '
+							 'MMseqs2.')
 
 	args = parser.parse_args()
 
-	# Check minimap2 and MMseqs2
+	# Check if minimap2 and MMseqs2 are in PATH
 	minimap2_path = shutil.which('minimap2')
+	if minimap2_path is None:
+		sys.exit('Could not find minimap2 in PATH. Please make sure '
+			     'minimap2 is installed.')
 	mmseqs2_path = shutil.which('mmseqs')
-	if minimap2_path is None or mmseqs2_path is None:
-		sys.exit('Could not find minimap2 or MMseqs2. Please make sure both are installed.')
+	if mmseqs2_path is None:
+		sys.exit('Could not find MMseqs2 in PATH. Please make sure '
+			     'MMseqs2 is installed.')
 
 	main(**vars(args))
 

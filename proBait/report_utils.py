@@ -90,7 +90,7 @@ def missing_intervals_hists(depth_values):
 	return tracers
 
 
-def depth_lines(depth_values, ordered_contigs):
+def depth_lines(depth_values, ordered_contigs, step=1):
 	"""
 	"""
 	shapes = {}
@@ -119,24 +119,30 @@ def depth_lines(depth_values, ordered_contigs):
 			# group depth values into groups of equal sequential values
 			values_groups = [list(j) for i, j in groupby(c[0].values())]
 			shape_start = cumulative_pos
-			for g in values_groups:
-				# cumulative and contig values already include +1
-				# subtract 1 from total sequence length
-				hovertext.append(contig_pos)
-				hovertext.append(contig_pos + (len(g) - 1))
+			j = 0
+			for i, g in enumerate(values_groups):
+				if i == 0 or i == len(values_groups) - 1 or j >= step:
+					# cumulative and contig values already include +1
+					# subtract 1 from total sequence length
+					hovertext.append(contig_pos)
+					hovertext.append(contig_pos + (len(g) - 1))
 
-				start_x = cumulative_pos
-				stop_x = start_x + (len(g) - 1)
+					start_x = cumulative_pos
+					stop_x = start_x + (len(g) - 1)
 
-				# add full length to get start position of next contig
+					x_values.extend([start_x, stop_x])
+					y_values.extend([g[0], g[0]])
+					if j >= step:
+						j = 0
+
+				# Add full length to get start position of next contig
+				j += len(g)
 				cumulative_pos += len(g)
 				contig_pos += len(g)
 
-				x_values.extend([start_x, stop_x])
-				y_values.extend([g[0], g[0]])
-
 			shapes[k].append([shape_start, stop_x, p])
-		# use Scattergl to deal with large datasets
+		# Use Scattergl to deal with large datasets
+		print(len(x_values))
 		tracer = go.Scattergl(x=x_values,
 							  y=y_values,
 							  text=hovertext,
@@ -154,7 +160,7 @@ def depth_lines(depth_values, ordered_contigs):
 	return [tracers, shapes]
 
 
-def coverage_table(initial2_data, final2_data, ref_ids, nr_contigs):
+def coverage_table(initial2_data, final2_data, files_info, ref_ids, nr_contigs):
 	"""
 	"""
 	samples = [k+' (ref)'
@@ -198,6 +204,24 @@ def coverage_table(initial2_data, final2_data, ref_ids, nr_contigs):
 			# 'Initial covered bases': initial_covered,
 			# 'Initial uncovered bases': initial_uncovered,
 			'Generated baits': generated_baits}
+
+	if len(files_info) > 0:
+		files_cov = [round(files_info[k][0], 4) for k in nr_contigs]
+		files_covered = [files_info[k][1] for k in nr_contigs]
+		files_uncovered = [files_info[k][2] for k in nr_contigs]
+		data['Files breadth of coverage'] = files_cov
+		data['Files covered bases'] = files_covered
+		data['Files uncovered bases'] = files_uncovered
+
+		map_mean_depth = []
+		for k in nr_contigs:
+			length = nr_contigs[k][2]
+			depth_counts = files_info[k][4]
+			depth_sum = sum([d*c for d, c in depth_counts.items()])
+			mean = round(depth_sum/length, 4)
+			map_mean_depth.append(mean)
+
+		data['Files mean depth of coverage'] = map_mean_depth
 
 	coverage_df = pd.DataFrame(data)
 
