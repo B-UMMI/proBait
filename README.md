@@ -4,7 +4,7 @@ proBait is a tool for designing baits/probes for target enrichment/target captur
 
 ## Installation
 
-We recommend creating a separate environment to install proBait and its dependencies.
+We recommend creating a separate environment with conda to install proBait and its dependencies. You can do this by installing [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install).
 
 ### Pip
 
