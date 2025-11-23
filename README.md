@@ -4,22 +4,6 @@ proBait is a tool for designing baits/probes for target enrichment/target captur
 
 ## Installation
 
-We recommend creating a separate environment with conda to install proBait and its dependencies. You can do this by installing [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install).
-
-### Pip
-
-```
-pip3 install probait
-```
-
-### Source
-
-Just `cd` into the `proBait` directory after cloning this repository and run:
-
-```
-pip install .
-```
-
 #### Python dependencies
 
 - biopython>=1.83
@@ -27,14 +11,25 @@ pip install .
 - pandas>=1.5.3
 - datapane>=0.17.0
 
-These dependencies are automatically installed in any of the aforementioned installation methods.
-
 #### Other dependencies
 
 - [minimap2](https://github.com/lh3/minimap2)
 - [MMseqs2](https://github.com/soedinglab/MMseqs2)
 
-These dependencies are not installed automatically. Please install them in the environment you are working on.
+We recommend creating a separate environment to install proBait and its dependencies. You can do this by installing [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install).
+After installing miniconda, you can run the following command to create a new environment to install proBait into:
+
+```
+conda create -c bioconda -c conda-forge -n proBait python=3.11
+```
+
+Followed by the following commands to activate the environment and install proBait and its dependencies:
+
+```
+conda activate proBait
+conda install -c bioconda -c conda-forge biopython plotly pandas datapane minimap2 mmseqs2
+pip3 install probait
+```
 
 ## Usage
 
