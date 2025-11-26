@@ -4,7 +4,7 @@ proBait is a tool for designing baits/probes for target enrichment/capture exper
 
 ## Installation
 
-:warning: proBait was designed to work on Linux and its installation and usage requires minimal experience with the command line.
+:warning: proBait was designed to work on Linux and its usage requires minimal experience with the command line.
 
 #### Python dependencies
 
