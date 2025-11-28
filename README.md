@@ -34,6 +34,8 @@ pip3 install probait
 ```
 
 ## Usage
+The [documentation](https://probait.readthedocs.io/en/latest/) includes detailed information about proBait's implementation, usage, and several tutorials.
+
 
 ```
 usage: proBait.py [-h] -i INPUT_FILES -o OUTPUT_DIRECTORY [-gb] [-b BAITS] [-bp BAIT_PROPORTION] [-rf REFS] [-msl MINIMUM_SEQUENCE_LENGTH]
