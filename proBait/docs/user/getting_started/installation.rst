@@ -8,25 +8,18 @@ Install the latest released version using :
 
 ::
 
-	conda create -c bioconda -c conda-forge -n proBait ""
+	conda create -c bioconda -c conda-forge -n proBait "python=3.11"
+
+Followed by the following commands to install proBait and its dependencies:
+
+::
+
+	conda activate proBait
+	conda install -c bioconda -c conda-forge biopython plotly pandas datapane minimap2 mmseqs2
+	pip3 install probait
 
 If you're having issues installing proBait through conda, please verify that you are using
-conda>=22.11, and enable the libmamba solver, which might speed up the installation process.
-You can also install `mamba <https://mamba.readthedocs.io/en/latest/index.html>`_ and run the following command:
-
-::
-
-	mamba create -c bioconda -c conda-forge -n proBait ""
-
-Pip
-...
-
-Install using `pip <https://pypi.org/project/proBait/>`_:
-
-::
-
-	pip3 install proBait
-
+conda>=22.11, and enable the libmamba solver, which may speed up the installation process.
 
 Python dependencies
 ...................
