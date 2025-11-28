@@ -35,9 +35,10 @@ Citation
 
 When using proBait please cite its GitHub repository:
 
-```
-Mamede, R., & Ramirez, M. (2024). proBait (Version 0.1.0) [Computer software]. https://github.com/B-UMMI/proBait
-```
+::
+
+	Mamede, R., & Ramirez, M. (2024). proBait (Version 0.1.0) [Computer software]. https://github.com/B-UMMI/proBait
+
 
 Licensing
 ---------
